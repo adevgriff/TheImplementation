@@ -1,0 +1,58 @@
+3/25/23
+
+****************************************ALL ABOUT REGISTERS**************************************************************************************8
+
+First the nessacary implementation details for the registers of the xtensa processor
+
+32 big register file this should through the windowed register scheme hold 32 or 64 general purpose registers
+    -best to implement as an array of 32 bit unsigned integers probably coupled with the functions that access integers
+
+-32 bit program counter that only stores the lower oder 30 bits that are stored in it leaving the other two alone
+    -this means that subroutines called using register window instructions must be placed in the same 1Gb address
+
+-Tons of special registers would like more details on this one to be continued
+
+-16 one bit boolean registers will just implement as booleans unless seems more effiecent to store as bits may be worth
+    looking into and learning from
+
+-16 optional 32 bit floating point registers would definately need to look at details on this to determine the exact details of the floating point scheme
+    that is used would probably like to have c-ustom function to convert the bits into the floating point number in whatever C is using and back as part of the function
+    that comes after these
+
+- four optional 32bit MAC16 data registers these can hole 2 16 bit operands and a 32 bit result
+
+- optional vectra LXDSP register files do not know all the details of these yet but should work the same as with the general purpose register file but does not have access to
+    the windowing capabilities
+
+
+-----------------------------------------The Size 32 General Purpose Register File-----------------------------------------------------
+
+-made of a collection of flip flops probably don't have to go this far down the rabbit hole on these for this project takes in addresses of registers and a location to store responce
+    and address to get data
+
+-32 or 64 reisters in size instructions have access to these registers through a sliding window of 16 registers
+
+-uses a 4 bit encoding for source and destination registers
+
+-When window overflows triggers a window overflow exception that spills contents of the old window to a pre allocated stack.
+
+-When rotating back to spilled window, underflow exception occurs thats handeler stores spilled contents back into register file
+    -some of this may require thinking about how the precessor does handel exceptions to fully implement this correctly but it definately
+     need to be implemented this project otherwise programs would definately be capable of executing different from original hardware.
+
+
+-window uses instructions to rotate the register file by 4, 8, or 12 registers allawys must have at least a 4 bits (16 - <number of registers moved>) of overlap with old position of
+    the window to pass data into the new window
+
+-------------------------------------------Special Register ------------------------------------------------------------------------------
+
+-Instructions that read and write registers are seperate from ones that operate on special registers these functions include
+    -XSR
+    -WSR
+    -RSR
+    -RUR
+    -WUR
+
+-each special register has a number some overlap in number with others but since they are accessed by different functions this is not a concern
+
+-The table of the special register numbers I will include in this file 

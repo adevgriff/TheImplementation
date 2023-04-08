@@ -44,6 +44,8 @@ First the nessacary implementation details for the registers of the xtensa proce
 -window uses instructions to rotate the register file by 4, 8, or 12 registers allawys must have at least a 4 bits (16 - <number of registers moved>) of overlap with old position of
     the window to pass data into the new window
 
+More than one reigister window causing overflow underflow restoring?
+
 -------------------------------------------Special Register ------------------------------------------------------------------------------
 
 -Instructions that read and write registers are seperate from ones that operate on special registers these functions include
@@ -56,3 +58,53 @@ First the nessacary implementation details for the registers of the xtensa proce
 -each special register has a number some overlap in number with others but since they are accessed by different functions this is not a concern
 
 -The table of the special register numbers I will include in this file 
+
+-----------------------------------------Opcode decoding-----------------------------------------------------------------------------
+AR is address register BR is "base or branch register?"
+op0 - major Opcode
+op1 - 4bit subopcode for 24 bit instructions
+op2 - 4bit subopcode for 24 bit instructions
+r- AR taret result, BR target result, 4 bit immediate, 4 bit subopcode
+s - AR source, BR source, AR target
+t - AR target, BR target, AR source, BR source, 4 bit subopcode
+n- register window invrement, 2 bit subopcode, n||2'b00 is used as a AR target on CALLn/CALLXn
+m- 2 bit subopcode
+i- 1 bit subopcode
+z- 1 bit subopcode
+imm4- 4 bit immediate
+imm6- 6 bit immediate
+....continutes for 7,8,12,16
+offset - 18 bit PC-relitive offset
+ai4const - 4bit immediate, if 0 interpreted as a -1 otherwise sign extended
+b4const - 4 bit encoded constant value
+bbi - 5 bit selector for booleans in register
+sa- 4 or 5 bit shift MAC16_REGISTER_AMOUNT
+sr- 8 bit special register selector
+x - 1 bit MAC16 data reg selector only to be used for M0 or M1
+y - 1 bit MAC 16 data register selector to be used for only M2 and M3
+w-2 bit MAC 16 data register selector that can be used for all the registers
+
+-----------------------------------Core Processor config parameters---------------------------------------------------------------------------------------------
+msbFirst Byte Order either a 0 meaning little endian or 1 meaning Big endian
+
+-----------------------------------Memory addressing------------------------------------------------------------------------------------------------------------
+pin style memory access for library user probably the best optional
+
+32 bit memory addressing
+
+load and store instruction can access the whole 32 bit memory space
+
+PC can access instruction throughtout the whole 32 bit memory space
+
+Register window call and return cannot access entire memory space
+    cannot cross 1 G bit boundries because they only store the lower
+    lower 30 bits and they leave the higher 2 bits of PC unchanged
+
+Configured to use either big or little endian
+
+addresses memory as bytes(8-bits)
+    halfwords(16 bits)
+    words(32 - bits)
+    possible designer defined 64 and 128 bits
+
+memeory references must be aligned using an alignment equal to the size of the data

@@ -108,3 +108,133 @@ addresses memory as bytes(8-bits)
     possible designer defined 64 and 128 bits
 
 memeory references must be aligned using an alignment equal to the size of the data
+
+/****************************Load and store instruction details*********************************************************/
+load instructions form an address by adding a base register and an 8 bit unsigned offset.
+
+this address is tehn used to access the memory system which can be through cache(will need to see the kind of cache to implement)
+
+the memory system returns a data item which can be 32 64 or 128 bits depending on the configuration
+
+the load instructions then extract the referenced data from that memroy item and either zero-extend or sign-extend the result to be written to a register
+
+unless unaligned exception option is enabled the processor does not handle misaligned data or trap when misaligned address is used instead it just loads the aligned data item at the computed address
+    allowing funnel shifter to be used with pair of loads to reference data on any byte address
+
+    funnel shifter details here - 
+
+ONLY instructions L32I and L32I.N and L32R may access instruction RAM and ROM locations
+
+store instructions access address information similarly to load instructions
+
+store memory erros are not synchronous exceptions expect that the memory system will use an interrupt to indeicate a store error
+
+ONLY instructions s32I and s32I.N may access instruction Ram and instruction ROM
+
+/******************************Jump and Call Instructions*************************************************************************************************/
+
+PC-relative jump and call instructions have a longer range then conditional branches(specifically J)
+jump and call indirect instructions provide support for case dispatch function variables and dynamic linking
+
+/******************************Conditional Branch Instruction Detials****************************************************************************************************************************/
+Compound compare and branch instructions improve code density and performance compared to other ISAs
+
+All branches are PC-relative 
+
+the immediate field contains the difference between the target PC plus 4 and the current PC
+the use of a PC-relative offset of -3 to 0 is illegal and reserved for future use
+
+/**************************Move instruction details***************************************************************************************************************************************/
+MOVI sets a reigster to a constant encoded in the instruction the conditional move instructions are used for branch avoidance
+
+/************************Arithmetic Instruction details*************************************************************/
+ones with small shift are for address calculations and synthesizing constant multiples
+ADDMI instruction is used to extend the range of load and store instructions
+
+/*************************Bitwise Logical Instruction Details*****************************/
+EXTUI can perform many of the most commonly used bitwise AND operations
+no immediate forms because it would be limited to 4 bits due to Xtensa LX core's compact 24/16 bit instruction words
+
+/**************************Shift Instruction Details*********************************/
+no single instruction shifts where the shift amount is a register operands
+    this is because taking amounts from a general register can create critical timing paths that may limity processors max clock frequency
+Funnel shifts(where two data values are catenated on input to the shifter) solve this problem but require too many operands
+
+To fix shifting issues Xtensa LX architectre provides a funnel shift where shift amount is taken from SAR register
+    variable shifts are synthesized by compiler using an instruction to compute SAR from the shift amout in general register followed by a funnel shift
+
+to facilitate unsigned bit-field extraction the EXTUI instructions take a 4 bit mask field that specifies the number of mask bits to use on the shift result
+    the 4 bit field spcifies masks of 1 to 16 ones
+
+SRLI instruction provides shifting without a mask
+
+the legal range of values for the SAR is 0 to 32 not 0 to 31 the use of SRC, SRA, SLL, or SRL when SAR > 32 is undefined
+
+contents of SAR are undefined after the processor reset adn should be initialized by the reset exception-vector code
+
+/***************************Special Register Details******************************************/
+SAR register is part of the non privileged special register set in the Xtensa ISA
+
+contents of the special register in the core architecture can be read and written to and from the AR registers
+with the Read Special Register(RSR.SAR), similar for write and exchange with WSR and XSR instructions
+
+SAR is special register number 3
+
+/*************************Xtensa Application Binary Interface(ABI)***************************************/
+ABI specifies the software conventions required for Xtensa code to interperate
+
+    - Data types and alignment for standard C and C++ data types  noted in Xtensa_lx Overview handbook page 69
+    -Stack Fram Layout
+        -grows down from high to low addresses
+        -SP must always be aligned to 16 byte boundry
+        -Each stack frame contians at least 16 bytes of register window save area
+        -if a function call has arguments that do not fit in registers they are passed on the stack beginning at the
+            stack pointer address
+        - frame pointer register is only required when storage is dynamically allocated on the stack
+            for example with alloca instruction or for variable sized local arrays
+        -when a frame pointer is used it is set to the value of the stack pointer before any stack space is dynamically allocated
+    -Calling conventions
+        -register windows for the caller and the callee are not the same but they partially overlap
+        -as many as six words of arguments can be passed from the caller to the callee in these overlapping registers
+        -as many as four words of a return value can be returned in the same registers
+        -what does not fit to pass in registers is passed on the stack same for what needs to be returned
+        -register a0 is return address, a1 is stack pointer, a2-a7 are incomming arguments, a7 is an optional frame pointer
+
+/****************************Exception-Processing States and Options************************************/
+baseline processor configuration only supports synchronous exceptions like those caused by illegal instructions, system calls and instruction-fetch errors and load/store errors
+
+only one exception model Xtensa Exception Architecture 2(XEA2) supported
+
+two exception vectors both configuration options UserExceptionVector and KernelExceptionVector
+
+-saves the address of the instruction causing the exception into special register EPC[1]
+-cause code for the exception goes into special reigister EXCCAUSE
+-Interrupts and exceptions are precise so that on returning from the exception handler program execution can continue exactly where it left offset
+
+lots of exception options unaligned exception, interrupt exception, high priority interrupt exception, timer interrupt exception
+
+/*****************************Memory Management Model Types and Options*****************************************/
+core supports one memory management configureation region protection implemented by a block called the region protection unit(RPU)
+
+Region protection
+
+-The RPU divides teh processors memory space into eight memory regions
+-seperate protection settings for instruction and data memory accesses
+-access modes of each memory region can be changed using appropriate WITLB or WDTLB instruction
+-region number RN maps to starting address of region by RN*0x20000000 RN's go from 0-7
+-when access mode attribute is set to a reserved or illegal value memory accesses to that region cause an exception as listed in table on page 76 in overview handbook
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+At this point abandoning lx overview handbook as it is mostly focused on programmers programming for the processor and does not go into nessassary details
+
+
+For sure starting with only the core architecture
+
+The processor state for the core architecture
+
+AR,  qunatity 16, width 32, Address register file, R/w
+PC, quantity 1, width 32, Program counter
+SAR, quantity 1, width 6, shift amount register, R/W, special register number 3
+
+guessing these are the supported registers for the core architecture
+

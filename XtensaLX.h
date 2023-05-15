@@ -19,16 +19,19 @@ extern "C"
 #define MAC16_REGISTER_AMOUNT 4
 #define XTEN_MSB_ON 1
 #define XTEN_MSB_OFF 0
+#define XTEN_HIGH 1
+#define XTEN_LOW 0
 
     static inline void xten_decodeQRST(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeCALLN(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeRST0(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeRST1(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeRST3(Xtensa_lx_CPU *CPU, uint32_t opcode);
+    static inline void xten_decodeSI(Xtensa_lx_CPU *CPU, uint32_t opcode);
+
     static inline void xten_coreShiftInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreArithmeticInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreJumpCallInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
-    static inline void xten_decodeSI(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreConditionalBranchInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreBitwiseLogicalInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreMoveInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
@@ -43,15 +46,21 @@ extern "C"
     {
         // variables for parts of the cpu will go here
         /*Starting with registers*/
-        uint32_t *registerFile;
+        uint32_t *registerFile; // only part of this register file will be used because in the core architecture register windowing is not enabled
         uint32_t PC;
-        uint32_t *optionalFloatingPointRegisters;
-        uint32_t *optionalMAC16Registers;
-        bool *bRegisters;
-        // may want to add the optional windowless register files but need more details
-        int windowOffset;
-        uint8_t msbFirstOption;
-        bool configurable;
+        // uint32_t *optionalFloatingPointRegisters; not used in the core architecture
+        // uint32_t *optionalMAC16Registers; not used in the core architecture
+        // uint8_t *bRegisters; not used in the core architecture
+        //  may want to add the optional windowless register files but need more details
+        int windowOffset;       // this will remain zero in the core architecture because there is no register windowing
+        uint8_t msbFirstOption; // this is set when the CPU is in big-endian mode
+        uint8_t configurable;   // this is set to false when it is no longer defined to change certian CPU options options decided at a chip designer level
+        // IO
+        uint32_t addressLines; // each bit is a pin representing the address the CPU is currently going to read from memory
+        uint32_t dataBus;      // each bit is a input pin that will the value at an address to read from or data that is being written to other parts of the CPU
+        uint8_t chipEnable;    // if chip not enabled a clock pulse makes no changes to the internal state of the CPU. ACTIVE HIGH
+        uint8_t write;         // this is set if on this clock pulse the CPU will be attempting a write on this clock pulse then data bus is set to value to be written and address is set to where
+                               // the data should be written. ACTIVE HIGH
     };
 
     /**
@@ -72,6 +81,88 @@ extern "C"
     }
 
     /**
+     * @brief Reads write signal
+     *
+     * This function is used to check if the write signal is high or not returns a boolean true if writing this can be used for example
+     * by the memory to check to see if the values in the data bus need to be written to the values at the address bus.
+     *
+     * @param *CPU Xtensa_lx_CPU pointer takes the address of the Xtensa CPU check the write pin of
+     * @return boolean true when the CPU is writing on this clock pulse
+     */
+    bool xten_checkWrite(Xtensa_lx_CPU *CPU)
+    {
+        return (CPU->write == XTEN_HIGH);
+    }
+
+    /**
+     * @brief Used to enable or disable this processor
+     *
+     * This function is used to enable and disable the processor passed in when recieving also weather the chip enable pin should be set to XTEN_HIGH
+     * or XTEN_LOW the chip enable pin in this itteration of the simulator is active high
+     *
+     * @param *CPU Xtensa_lx_CPU pointer takes the address of the Xtensa CPU being altered
+     * @param uint8_t value that should be set to either XTEN_HIGH or XTEN_LOW
+     */
+    void xten_setChipEnableState(Xtensa_lx_CPU *CPU, uint8_t chipEnableState)
+    {
+        CPU->chipEnable = (chipEnableState <= 0) ? XTEN_LOW : XTEN_HIGH;
+    }
+
+    /**
+     * @brief reads specified pin of address line
+     *
+     * This function returns the state of a single specified pin of the address line of the passed in CPU
+     *
+     * @param *CPU Xtensa_lx_CPU pointer takes the address of the Xtensa CPU being altered
+     * @param uint8_t will be %32 representing the pin to recieve the value of
+     * @return uint8_t XTEN_HIGH or XTEN_LOW of the specified pin
+     */
+    uint8_t xten_readSpecifiedAddressPin(Xtensa_lx_CPU *CPU, uint8_t pin)
+    {
+        uint32_t mask = 1 << (pin % 32);
+        return (CPU->addressLines & mask) ? XTEN_HIGH : XTEN_LOW;
+    }
+
+    /**
+     * @brief reads specified pin of the data bus
+     *
+     * This function returns the state of a single specified pin of the data bus of the passed in CPU
+     *
+     * @param *CPU Xtensa_lx_CPU pointer takes the address of the Xtensa CPU being altered
+     * @param uint8_t will be %32 representing the pin to recieve the value of
+     * @return uint8_t XTEN_HIGH or XTEN_LOW of the specified pin
+     */
+    uint8_t xten_(Xtensa_lx_CPU *CPU, uint8_t pin)
+    {
+        uint32_t mask = 1 << (pin % 32);
+        return (CPU->dataBus & mask) ? XTEN_HIGH : XTEN_LOW;
+    }
+
+    /**
+     * @brief writes specified pion of the data bus to specified value
+     *
+     * This function writes the pin specified of the data bus in the passed in CPU to be either XTEN_HIGH or XTEN_LOW depending on user input
+     *
+     * @param *CPU Xtensa_lx_CPU pointer takes the address of the Xtensa CPU being altered
+     * @param uint8_t will be %32 representing the pin of the databus being written
+     * @param uint8_t value the pin will be set to either XTEN_HIGH or XTEN_LOW
+     */
+    void xten_(Xtensa_lx_CPU *CPU, uint8_t pin, uint8_t value)
+    {
+        uint32_t mask = 1 << (pin % 32);
+        if (value == XTEN_HIGH)
+        {
+            CPU->dataBus = CPU->dataBus | mask;
+        }
+        else
+        {
+            CPU->dataBus = CPU->dataBus & ~mask;
+        }
+    }
+
+    // Clock pulse function goes here
+
+    /**
      * @brief Creates a new Xtensa_lx_CPU object
      *
      * This function creates a new Xtensa_lx_CPU object with default values that can be changed directly by a confident user
@@ -83,12 +174,18 @@ extern "C"
     {
         Xtensa_lx_CPU *resultingCPU;
         resultingCPU->registerFile = (uint32_t *)malloc(DEFAULT_REGISTER_FILE_SIZE * sizeof(uint32_t));
-        resultingCPU->bRegisters = (bool *)malloc(BOOLEAN_REGISTER_AMOUNT * sizeof(bool));
+        // resultingCPU->bRegisters = (bool *)malloc(BOOLEAN_REGISTER_AMOUNT * sizeof(bool));
         resultingCPU->windowOffset = 0;             // no offset for initial window wont move on core architecture so only 16 registers
         resultingCPU->PC = 0;                       // start at instruction at address zero
         resultingCPU->msbFirstOption = XTEN_MSB_ON; // default is big-endian
         resultingCPU->configurable = true;          // new CPU is still configureable
+        resultingCPU->chipEnable = XTEN_HIGH;       // chip enabled by default
+        resultingCPU->write = XTEN_LOW;             // chip not writing the first clock cycle
+        resultingCPU->addressLines = 0;             // starting at address zero
+        resultingCPU->dataBus = 0;                  // this is simply to initialize it to something
     }
+
+    /****************************************This section is for decoding**************************************************************/
 
     /**
      * @brief This decodes the passed in opcode fetched for the passed in CPU
@@ -583,9 +680,6 @@ extern "C"
         }
     }
 
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
     /**
      * @brief This decodes the passed in opcode fetched for the passed in CPU that have already been designated part of RST3 table.
      *
@@ -650,18 +744,11 @@ extern "C"
         }
     }
 
+    /*******************************************End of decoding section***********************************************************************/
+
     static inline void xten_freeCPU(Xtensa_lx_CPU *CPU)
     {
         free(CPU->registerFile);
-        free(CPU->bRegisters);
-        if (CPU->optionalFloatingPointRegisters)
-        {
-            free(CPU->optionalFloatingPointRegisters);
-        }
-        if (CPU->optionalMAC16Registers)
-        {
-            free(CPU->optionalMAC16Registers);
-        }
     }
 
     static inline void xten_coreLoadInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)

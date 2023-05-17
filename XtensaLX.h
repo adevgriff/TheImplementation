@@ -11,6 +11,7 @@ extern "C"
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 /*CPU defines no magic numbers floating about*/
 #define DEFAULT_REGISTER_FILE_SIZE 32
@@ -22,12 +23,15 @@ extern "C"
 #define XTEN_HIGH 1
 #define XTEN_LOW 0
 
+    typedef struct Xtensa_lx_CPU Xtensa_lx_CPU;
+
     static inline void xten_decodeQRST(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeCALLN(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeRST0(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeRST1(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeRST3(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeSI(Xtensa_lx_CPU *CPU, uint32_t opcode);
+    static inline void xten_decodeLSAI(Xtensa_lx_CPU *CPU, uint32_t opcode);
 
     static inline void xten_coreShiftInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreArithmeticInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
@@ -35,6 +39,9 @@ extern "C"
     static inline void xten_coreConditionalBranchInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreBitwiseLogicalInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreMoveInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
+    static inline void xten_coreLoadInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
+    static inline void xten_coreStoreInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
+    static inline void xten_coreProcessorControlInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
 
     /**
      * @brief struct representing an Xtensa CPU
@@ -61,7 +68,7 @@ extern "C"
         uint8_t chipEnable;    // if chip not enabled a clock pulse makes no changes to the internal state of the CPU. ACTIVE HIGH
         uint8_t write;         // this is set if on this clock pulse the CPU will be attempting a write on this clock pulse then data bus is set to value to be written and address is set to where
                                // the data should be written. ACTIVE HIGH
-    };
+    } Xtensa_lx_CPU;
 
     /**
      * @brief Sets the msbFirst option
@@ -132,14 +139,14 @@ extern "C"
      * @param uint8_t will be %32 representing the pin to recieve the value of
      * @return uint8_t XTEN_HIGH or XTEN_LOW of the specified pin
      */
-    uint8_t xten_(Xtensa_lx_CPU *CPU, uint8_t pin)
+    uint8_t xten_readSpecifiedDataPin(Xtensa_lx_CPU *CPU, uint8_t pin)
     {
         uint32_t mask = 1 << (pin % 32);
         return (CPU->dataBus & mask) ? XTEN_HIGH : XTEN_LOW;
     }
 
     /**
-     * @brief writes specified pion of the data bus to specified value
+     * @brief writes specified pin of the data bus to specified value
      *
      * This function writes the pin specified of the data bus in the passed in CPU to be either XTEN_HIGH or XTEN_LOW depending on user input
      *
@@ -147,7 +154,7 @@ extern "C"
      * @param uint8_t will be %32 representing the pin of the databus being written
      * @param uint8_t value the pin will be set to either XTEN_HIGH or XTEN_LOW
      */
-    void xten_(Xtensa_lx_CPU *CPU, uint8_t pin, uint8_t value)
+    void xten_writeSpecifiedDataPin(Xtensa_lx_CPU *CPU, uint8_t pin, uint8_t value)
     {
         uint32_t mask = 1 << (pin % 32);
         if (value == XTEN_HIGH)

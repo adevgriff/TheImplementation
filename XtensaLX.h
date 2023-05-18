@@ -15,6 +15,7 @@ extern "C"
 
 /*CPU defines no magic numbers floating about*/
 #define DEFAULT_REGISTER_FILE_SIZE 32
+#define REGISTER_WINDOW_SIZE 16
 #define BOOLEAN_REGISTER_AMOUNT 16
 #define FLOATING_POINT_REGISTER_AMOUNT 16
 #define MAC16_REGISTER_AMOUNT 4
@@ -32,6 +33,7 @@ extern "C"
     static inline void xten_decodeRST3(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeSI(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_decodeLSAI(Xtensa_lx_CPU *CPU, uint32_t opcode);
+    static inline void xten_decodeOp0(Xtensa_lx_CPU *CPU, uint32_t opcode);
 
     static inline void xten_coreShiftInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreArithmeticInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
@@ -42,6 +44,9 @@ extern "C"
     static inline void xten_coreLoadInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreStoreInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreProcessorControlInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
+
+    void xten_helper_printBinary(uint32_t value);
+    void xten_helper_printRegisters(uint32_t *reg_file, uint32_t offset);
 
     /**
      * @brief struct representing an Xtensa CPU
@@ -69,6 +74,55 @@ extern "C"
         uint8_t write;         // this is set if on this clock pulse the CPU will be attempting a write on this clock pulse then data bus is set to value to be written and address is set to where
                                // the data should be written. ACTIVE HIGH
     } Xtensa_lx_CPU;
+
+    /**
+     * @brief Executes next instruction set at the datapins of the CPU
+     *
+     * This function fetchs the instruction from the databus and sends it down the pipeline this may perform multiple clock cycles
+     * at once. Due to this at times the CPU with be set to write and passed back to user in this senario the user can process the write
+     * accordingly and call this instruction again to continue processing beyond the write stage setting CPU to get the next instruction in the core architecture.
+     *
+     * @param *CPU Xtensa_lx_CPU pointer takes the address of the Xtensa CPU to execute next instruction on
+     */
+    void xten_executeNext(Xtensa_lx_CPU *CPU)
+    {
+        // should only process as an instruction if it is the next instruction and not data from memory for a load instruction
+        // or the end of processing a write
+        if (CPU->write == XTEN_HIGH)
+        {
+            // handle returning from a write here TODO
+        }
+        else
+        {
+            // because core architecture is all that is implemented at the moment all opcodes are 24 bits
+            uint32_t opcode = CPU->dataBus >> 8;
+            xten_decodeOp0(CPU, opcode); // this will set things to decode and execute opcode
+            // may result in an execute next with a flag set to do a process other then decoding and executing an instruction
+            // this is to allow the user to process certain stages in the pipeline for the instruction that may require such processing
+            // like writing to or reading data from memory.
+        }
+    }
+
+    /**
+     * @brief Displays the CPU state in a legible way
+     *
+     * This function writes to the console in a clean way the state of all the registers and pins on the processor
+     * allowing for the writing of processor before and after an instruction executes to debug proper execution of instructions.
+     *
+     * @param *CPU Xtensa_lx_CPU pointer to the CPU to display on console
+     */
+    void xten_displayCPU(Xtensa_lx_CPU *CPU)
+    {
+        printf("\tAddress Pins: ");
+        xten_helper_printBinary(CPU->addressLines);
+        printf("\n\tData Bus Pins: ");
+        xten_helper_printBinary(CPU->dataBus);
+        printf("\n\tProgram Counter: %d\n", CPU->PC);
+        // print register file with the register window displayed in a clear way
+        xten_helper_printRegisters(CPU->registerFile, CPU->windowOffset);
+        printf((CPU->chipEnable == XTEN_HIGH) ? "\tChip Enabled\n" : "\tChip Disabled\n");
+        printf((CPU->write == XTEN_HIGH) ? "\tChip Write Set\n" : "\tChip Read Set\n");
+    }
 
     /**
      * @brief Sets the msbFirst option
@@ -180,16 +234,19 @@ extern "C"
     Xtensa_lx_CPU xten_createCPU()
     {
         Xtensa_lx_CPU *resultingCPU;
+        resultingCPU = (Xtensa_lx_CPU *)malloc(sizeof(Xtensa_lx_CPU));
         resultingCPU->registerFile = (uint32_t *)malloc(DEFAULT_REGISTER_FILE_SIZE * sizeof(uint32_t));
         // resultingCPU->bRegisters = (bool *)malloc(BOOLEAN_REGISTER_AMOUNT * sizeof(bool));
-        resultingCPU->windowOffset = 0;             // no offset for initial window wont move on core architecture so only 16 registers
-        resultingCPU->PC = 0;                       // start at instruction at address zero
-        resultingCPU->msbFirstOption = XTEN_MSB_ON; // default is big-endian
-        resultingCPU->configurable = true;          // new CPU is still configureable
-        resultingCPU->chipEnable = XTEN_HIGH;       // chip enabled by default
-        resultingCPU->write = XTEN_LOW;             // chip not writing the first clock cycle
-        resultingCPU->addressLines = 0;             // starting at address zero
-        resultingCPU->dataBus = 0;                  // this is simply to initialize it to something
+        resultingCPU->windowOffset = 0;                // no offset for initial window wont move on core architecture so only 16 registers
+        resultingCPU->PC = 0;                          // start at instruction at address zero
+        resultingCPU->msbFirstOption = XTEN_MSB_ON;    // default is big-endian
+        resultingCPU->configurable = true;             // new CPU is still configureable
+        resultingCPU->chipEnable = XTEN_HIGH;          // chip enabled by default
+        resultingCPU->write = XTEN_LOW;                // chip not writing the first clock cycle
+        resultingCPU->addressLines = resultingCPU->PC; // starting at PC address
+        resultingCPU->dataBus = 0;                     // this is simply to initialize it to something
+
+        return *resultingCPU;
     }
 
     /****************************************This section is for decoding**************************************************************/
@@ -1354,6 +1411,52 @@ extern "C"
         // used for WSR.DBREAKC* and WSR.DBREAKA* instructions
         // pipeline specific
         //
+    }
+
+    /**
+     * @brief prints the binary representation of a uint32_t
+     *
+     * This function takes a uint32_t and prints the binary representation with no whitespace.
+     *
+     * @param uint32_t value to print
+     */
+    void xten_helper_printBinary(uint32_t value)
+    {
+        for (int i = 31; i >= 0; i--)
+        {
+            // Right shift num i times, then bitwise AND with 1 to get the ith bit
+            uint32_t bit = (value >> i) & 1;
+            printf("%u", bit);
+        }
+    }
+
+    /**
+     * @brief prints the entire register file to console
+     *
+     * This function takes the register file to print and the offset of the first element of the register file
+     * to be included in the register window and uses defines for the size of the register file and the offset
+     * to display in a way that makes it clear what elements of the register file are what items in the register window.
+     *
+     * @param uint32_t* the register file
+     * @param uint32_t offset of the first register in the window
+     */
+    void xten_helper_printRegisters(uint32_t *reg_file, uint32_t offset)
+    {
+        for (uint32_t i = 0; i < DEFAULT_REGISTER_FILE_SIZE; i++)
+        {
+            // Check if the current register is in the window
+            if (i >= offset && i < offset + REGISTER_WINDOW_SIZE)
+            {
+                printf("\t* ");
+            }
+            else
+            {
+                printf("\t  ");
+            }
+
+            // Print register number and value
+            printf("Register %2u: 0x%08x\n", i, reg_file[i]);
+        }
     }
 
 #ifdef __cplusplus

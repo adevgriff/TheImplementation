@@ -49,6 +49,37 @@ extern "C"
     void xten_helper_printRegisters(uint32_t *reg_file, uint32_t offset);
 
     /**
+     * @brief This is a function pointer type for memory access the user must implement.
+     * It represents a callback for reading from memory using the passed in CPU and address.
+     *
+     * @param CPU A pointer to the current CPU context.
+     * @param address The address in memory to read from.
+     * @return The value read from memory at the given address.
+     */
+    typedef uint32_t (*MemoryReadCallback)(Xtensa_lx_CPU *CPU, uint32_t address, void *context);
+
+    /**
+     * @brief This is a function pointer type for memory access the user must implement.
+     * It represents a callback for writing to memory using the passed in CPU, address and value.
+     *
+     * @param CPU A pointer to the current CPU context.
+     * @param address The address in memory to write to.
+     * @param value The value to write to memory at the given address.
+     */
+    typedef void (*MemoryWriteCallback)(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, void *context);
+
+    /**
+     * @brief Default memory write callback fucntion
+     * this simply takes the address and value and returns
+     *
+     * @param CPU A pointer to the current CPU context.
+     * @param address The address in memory to read from.
+     */
+    uint32_t xten_defaultMemoryWriteCallback(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, void *context)
+    {
+    }
+
+    /**
      * @brief struct representing an Xtensa CPU
      *
      * This struct stores register and option values for a simulated Xtensa CPU of an archtecture that can be
@@ -68,11 +99,16 @@ extern "C"
         uint8_t msbFirstOption; // this is set when the CPU is in big-endian mode
         uint8_t configurable;   // this is set to false when it is no longer defined to change certian CPU options options decided at a chip designer level
         // IO
-        uint32_t addressLines; // each bit is a pin representing the address the CPU is currently going to read from memory
-        uint32_t dataBus;      // each bit is a input pin that will the value at an address to read from or data that is being written to other parts of the CPU
-        uint8_t chipEnable;    // if chip not enabled a clock pulse makes no changes to the internal state of the CPU. ACTIVE HIGH
-        uint8_t write;         // this is set if on this clock pulse the CPU will be attempting a write on this clock pulse then data bus is set to value to be written and address is set to where
-                               // the data should be written. ACTIVE HIGH
+        uint32_t addressLines;           // each bit is a pin representing the address the CPU is currently going to read from memory
+        uint32_t dataBus;                // each bit is a input pin that will the value at an address to read from or data that is being written to other parts of the CPU
+        uint8_t chipEnable;              // if chip not enabled a clock pulse makes no changes to the internal state of the CPU. ACTIVE HIGH
+        uint8_t write;                   // this is set if on this clock pulse the CPU will be attempting a write on this clock pulse then data bus is set to value to be written and address is set to where
+                                         // the data should be written. ACTIVE HIGH
+        MemoryReadCallback readMemory;   // this handles memory reads function implemented by the user before CPU creation
+        MemoryWriteCallback writeMemory; // this handles memory writes function implemented by the user before CPU creation
+
+        void *callbackContext; // this allows the user to pass in any data they need to the callback implementations
+
     } Xtensa_lx_CPU;
 
     /**
@@ -86,21 +122,15 @@ extern "C"
      */
     void xten_executeNext(Xtensa_lx_CPU *CPU)
     {
-        // should only process as an instruction if it is the next instruction and not data from memory for a load instruction
-        // or the end of processing a write
-        if (CPU->write == XTEN_HIGH)
-        {
-            // handle returning from a write here TODO
-        }
-        else
-        {
-            // because core architecture is all that is implemented at the moment all opcodes are 24 bits
-            uint32_t opcode = CPU->dataBus >> 8;
-            xten_decodeOp0(CPU, opcode); // this will set things to decode and execute opcode
-            // may result in an execute next with a flag set to do a process other then decoding and executing an instruction
-            // this is to allow the user to process certain stages in the pipeline for the instruction that may require such processing
-            // like writing to or reading data from memory.
-        }
+        // because core architecture is all that is implemented at the moment all opcodes are 24 bits
+        uint32_t opcode = CPU->dataBus >> 8;
+        xten_decodeOp0(CPU, opcode); // this will set things to decode and execute opcode
+        // may result in an execute next with a flag set to do a process other then decoding and executing an instruction
+        // this is to allow the user to process certain stages in the pipeline for the instruction that may require such processing
+        // like writing to or reading data from memory.
+        // increment the PC and address appropriately
+        CPU->PC += 3;
+        CPU->addressLines = CPU->PC;
     }
 
     /**
@@ -231,7 +261,7 @@ extern "C"
      *
      * @return Xtensa_lx_CPU with default options
      */
-    Xtensa_lx_CPU xten_createCPU()
+    Xtensa_lx_CPU *xten_createCPU(MemoryReadCallback readMemory, MemoryWriteCallback writeMemory)
     {
         Xtensa_lx_CPU *resultingCPU;
         resultingCPU = (Xtensa_lx_CPU *)malloc(sizeof(Xtensa_lx_CPU));
@@ -246,7 +276,16 @@ extern "C"
         resultingCPU->addressLines = resultingCPU->PC; // starting at PC address
         resultingCPU->dataBus = 0;                     // this is simply to initialize it to something
 
-        return *resultingCPU;
+        resultingCPU->readMemory = readMemory;   // user defined function that handles the memory access portion of the pipeline the way the user defines
+        resultingCPU->writeMemory = writeMemory; // user defined function that handles the writeback portion of the pipeline the way the user defines
+
+        // TODO ensure that the funcitons for memory read and write are implemented if not the CPU should be NULL for easy handeling of errors for the user
+        if (readMemory == NULL || writeMemory == NULL)
+        {
+            resultingCPU = NULL;
+        }
+
+        return resultingCPU;
     }
 
     /****************************************This section is for decoding**************************************************************/
@@ -273,56 +312,59 @@ extern "C"
 #endif
         switch (op0 >> 2)
         {
-        case 0x00:
+        case 0x0:
             switch (op0)
             {
-            case 0x0000:
+            case 0x0:
                 // entering table decoding QRST193
                 xten_decodeQRST(CPU, opcode);
                 break;
-            case 0x0001:
+            case 0x1:
                 // goes to the L32R instruction
                 xten_coreLoadInstructions(CPU, opcode);
                 break;
-            case 0x0010:
+            case 0x2:
                 // entering table decoding LSAI216
                 xten_decodeLSAI(CPU, opcode);
                 break;
-            case 0x0011:
+            case 0x3:
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
+                break;
+            default:
+                printf("\nsomething went wrong the switch could not find the op0 after finding it started with the prefix zero opcode is %8x \n", op0);
                 break;
             }
             break;
-        case 0x01:
+        case 0x1:
             switch (op0)
             {
-            case 0x0100:
+            case 0x4:
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
                 break;
-            case 0x0101:
+            case 0x5:
                 // entering table decoding CALLN 7-232
                 xten_decodeCALLN(CPU, opcode);
                 break;
-            case 0x0110:
+            case 0x6:
                 // entering table decoding SI 7-233
                 xten_decodeSI(CPU, opcode);
                 break;
-            case 0x0111:
+            case 0x7:
                 // entering table decoding B 7-238 all instructions decode with r in execution of branch instructions function
                 xten_coreConditionalBranchInstructions(CPU, opcode);
                 break;
             }
             break;
-        case 0x10:
+        case 0x2:
 #ifdef XTEN_DEBUGGING
             printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
             break;
-        case 0x11:
+        case 0x3:
 #ifdef XTEN_DEBUGGING
             printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
@@ -355,46 +397,46 @@ extern "C"
 #endif
         switch (op1 >> 2)
         {
-        case 0x00:
+        case 0x0:
             switch (op1)
             {
-            case 0x0000:
+            case 0x0:
                 // RST0 table 7-194
                 xten_decodeRST0(CPU, opcode);
                 break;
-            case 0x0001:
+            case 0x1:
                 xten_decodeRST1(CPU, opcode);
                 break;
-            case 0x0010:
+            case 0x2:
                 // RST2 table 7-209 all unimplimented
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
                 break;
-            case 0x0011:
+            case 0x3:
                 // RST3 table 7-210
                 xten_decodeRST3(CPU, opcode);
                 break;
             }
             break;
-        case 0x01:
+        case 0x1:
             switch (op1)
             {
-            case 0x0000:
+            case 0x4:
                 // EXTUI instruction
                 xten_coreShiftInstructions(CPU, opcode); // TODO consider eleminating the repeat below this.
                 break;
-            case 0x0001:
+            case 0x5:
                 // EXTUI instruction
                 xten_coreShiftInstructions(CPU, opcode);
                 break;
-            case 0x0010:
+            case 0x6:
                 // CUST0 table 7.3.2 reserved for designer designed opcodes
 #ifdef XTEN_DEBUGGING
                 printf("\tThis hits the designer designed opcode table.\n");
 #endif
                 break;
-            case 0x0011:
+            case 0x7:
                 // CUST1 table 7.3.2 reserved for designer designed opcodes
 #ifdef XTEN_DEBUGGING
                 printf("\tThis hits the designer designed opcode table.\n");
@@ -402,12 +444,12 @@ extern "C"
                 break;
             }
             break;
-        case 0x10:
+        case 0x2:
 #ifdef XTEN_DEBUGGING
             printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
             break;
-        case 0x11:
+        case 0x3:
 #ifdef XTEN_DEBUGGING
             printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
@@ -438,7 +480,7 @@ extern "C"
 #ifdef XTEN_DEBUGGING_DETAILED
         printf("\tAt PC %X opcode %X n was found to be %X:\n", CPU->PC, opcode, n);
 #endif
-        if (n == 0x00)
+        if (n == 0x0)
         {
             // call zero instruction
             xten_coreJumpCallInstructions(CPU, opcode);
@@ -469,7 +511,7 @@ extern "C"
 #ifdef XTEN_DEBUGGING_DETAILED
         printf("\tAt PC %X opcode %X n was found to be %X:\n", CPU->PC, opcode, n);
 #endif
-        if (n == 0x00)
+        if (n == 0x0)
         {
             // jump instruction
             xten_coreJumpCallInstructions(CPU, opcode);
@@ -493,7 +535,7 @@ extern "C"
      */
     static inline void xten_decodeLSAI(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
-        uint32_t r = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+        uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
 #ifdef XTEN_DEBUGGING
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
@@ -502,8 +544,8 @@ extern "C"
 #endif
         switch (r >> 2)
         {
-        case 0x00:
-            if (r == 0x0011)
+        case 0x0:
+            if (r == 0x3)
             {
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
@@ -514,8 +556,8 @@ extern "C"
                 xten_coreLoadInstructions(CPU, opcode);
             }
             break;
-        case 0x01:
-            if (r == 0x0111)
+        case 0x1:
+            if (r == 0x7)
             {
                 // CACHE sub c table 7-217 decoding cache opcodes that do not exist in core architecture
 #ifdef XTEN_DEBUGGING
@@ -527,31 +569,31 @@ extern "C"
                 xten_coreStoreInstructions(CPU, opcode);
             }
             break;
-        case 0x10:
+        case 0x2:
             switch (r)
             {
-            case 0x1000:
+            case 0x8:
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
                 break;
-            case 0x1001:
+            case 0x9:
                 // L16SI instruction
                 xten_coreLoadInstructions(CPU, opcode);
                 break;
-            case 0x1010:
+            case 0xa:
                 // MOVI instruction
                 xten_coreMoveInstructions(CPU, opcode);
                 break;
-            case 0x1011:
+            case 0xb:
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
                 break;
             }
             break;
-        case 0x11:
-            if (r >> 1 == 0x110)
+        case 0x3:
+            if (r >> 1 == 0xc)
             {
                 xten_coreArithmeticInstructions(CPU, opcode);
             }
@@ -590,27 +632,27 @@ extern "C"
 #endif
         switch (op2 >> 2)
         {
-        case 0x00:
-            if (op2 == 0x0000)
+        case 0x0:
+            if (op2 == 0x0)
             {
                 // ST0 table
                 // if r is 0x0000 then SNM0 table 196 otherwise all reserved or unimplemented then uses M some of these are implemented so it is important TODO
-                if (((opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F) == 0x0000)
+                if (((opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F) == 0x0)
                 {
                     uint32_t m = (opcode >> (CPU->msbFirstOption ? 16 : 6)) & 0x03;
                     switch (m)
                     {
-                    case 0x00:
+                    case 0x0:
                         // ILL unimplemented
                         break;
-                    case 0x01:
+                    case 0x1:
                         // unimplemented
                         break;
-                    case 0x10:
+                    case 0x2:
                         // JR table 197 reserved or unimplemented based on n or goes to following function set
                         xten_coreJumpCallInstructions(CPU, opcode);
                         break;
-                    case 0x11:
+                    case 0x3:
                         // CALLX table 198 reserved or unimplemented based on n or goes to following function set
                         xten_coreJumpCallInstructions(CPU, opcode);
                         break;
@@ -629,21 +671,21 @@ extern "C"
                 xten_coreBitwiseLogicalInstructions(CPU, opcode);
             }
             break;
-        case 0x01:
+        case 0x1:
             switch (op2)
             {
-            case 0x0100:
+            case 0x4:
                 // ST1 table 202 some of these are used fairly complex needs own function
-            case 0x0101:
+            case 0x5:
                 // TLB table 203no further tables none of the instructions implemented
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
                 break;
-            case 0x0110:
+            case 0x6:
                 // RT0 table 204 used if s = 0x0000 NEG 0x0001 ABS otherwise reserved
                 uint32_t s = ((opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F);
-                if (s == 0x0000 || s == 0x0001)
+                if (s == 0x0 || s == 0x1)
                 {
                     xten_coreArithmeticInstructions(CPU, opcode);
                 }
@@ -654,18 +696,18 @@ extern "C"
 #endif
                 }
                 break;
-            case 0x0111:
+            case 0x7:
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
                 break;
             }
             break;
-        case 0x10:
+        case 0x2:
             // all arithmetic functions
             xten_coreArithmeticInstructions(CPU, opcode);
             break;
-        case 0x11:
+        case 0x3:
             // all arithmetic functions
             xten_coreArithmeticInstructions(CPU, opcode);
             break;
@@ -697,26 +739,26 @@ extern "C"
 #endif
         switch (op2 >> 2)
         {
-        case 0x00:
+        case 0x0:
             // all shift instructions
             xten_coreShiftInstructions(CPU, opcode);
             break;
-        case 0x01:
+        case 0x1:
             switch (op2)
             {
-            case 0x0100:
+            case 0x4:
                 xten_coreShiftInstructions(CPU, opcode);
                 break;
-            case 0x0101:
+            case 0x5:
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
                 break;
-            case 0x0110:
+            case 0x6:
                 // XSR instruction
                 xten_coreProcessorControlInstructions(CPU, opcode);
                 break;
-            case 0x0111:
+            case 0x7:
                 // ACCER table 206 a bit odd uses op2 again to differentiate in a conflicting manner neither instruction in core architecture
 #ifdef XTEN_DEBUGGING
                 printf("\tThis is an unimplemented or reserved opcode.\n");
@@ -724,11 +766,11 @@ extern "C"
                 break;
             }
             break;
-        case 0x10:
+        case 0x2:
             // all shift instructions
             xten_coreShiftInstructions(CPU, opcode);
             break;
-        case 0x11:
+        case 0x3:
             // MUL instructions not core instructions
             // IMP table 207 on 1111 all instructions on this table unimplemented RFDX 208 table on r = 0x1110
             // neither instruction on RFDX table implemented
@@ -764,9 +806,9 @@ extern "C"
 #endif
         switch (op2 >> 2)
         {
-        case 0x00:
+        case 0x0:
             // less than 2 implemented instructions RSR on 0 and WSR on 1
-            if (op2 < 0x10)
+            if (op2 < 0x2)
             {
                 xten_coreProcessorControlInstructions(CPU, opcode);
             }
@@ -777,19 +819,19 @@ extern "C"
 #endif
             }
             break;
-        case 0x01:
+        case 0x1:
             // all unimplemented
 #ifdef XTEN_DEBUGGING
             printf("\tThis is an unimplemented or reserved opcode.\n");
 #endif
             break;
-        case 0x10:
+        case 0x2:
             // all implemented move instructions
             xten_coreMoveInstructions(CPU, opcode);
             break;
-        case 0x11:
+        case 0x3:
             // greater than 13 implemented instructions RUR then WUR
-            if (op2 > 0x1101)
+            if (op2 > 0xd)
             {
                 xten_coreProcessorControlInstructions(CPU, opcode);
             }
@@ -817,6 +859,44 @@ extern "C"
 
     static inline void xten_coreLoadInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
+
+        size_t address = 0x0;
+        // for each instruction they need to calculate the address and the value to be assigned to the register the data each time is written to register t
+        // t is in the same place for all so it can be extracted first
+        uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F; // this is the index of the register to assign data to regFile[t+windowOffset] = value being loaded
+        // going to be if op0 is 0001 then set up RI16 style otherwise setup RRI8 style
+        uint32_t op0 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
+        if (op0 == 0x1)
+        {
+            printf("\n\tThe instruction is L32R\n");
+            // Now we calculate the address for the L32R instruction
+            size_t address = 0xFFFFFFFF;
+            address = ((address & ((opcode >> ((CPU->msbFirstOption ? 0 : 8)) & 0xFFFF) << 2)) + CPU->PC + 3) & 0xFFFFFFFC;
+        }
+        else
+        {
+            // the instruction is found by looking at r
+            uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
+            switch (r)
+            {
+            case 0x0:
+                printf("\n\tThe instruction is L8UI\n");
+                break;
+            case 0x9:
+                printf("\n\tThe instruction is L16SI\n");
+                break;
+            case 0x1:
+                printf("\n\tThe instruction is L16UI\n");
+                break;
+            case 0x2:
+                printf("\n\tThe instruction is L32I\n");
+                break;
+            default:
+                printf("\n\tThe instruction is not implemented or something went wrong!\n");
+                break;
+            }
+        }
+
         // Two opcodes being used here RRI8 and RI16 here they are in big endian both of these are 24 bit instructions
         // RRI8 is [4 bit major opcode][4 bit t AR target or source,BR target or Source, 4bit sub opcode][s 4 bit, AR source, BR source, AR target][r AR target, BR target, 4 bit immediate, 4-bit sub-opcode][imm8 8 bit immediate]
         // RI16 is [4 bit major opcode][t 4 bit][imm16 16 bit immediate]

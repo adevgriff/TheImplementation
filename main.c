@@ -4,6 +4,25 @@
 
 #define ROM_SIZE 0x180
 
+uint32_t readMemory(Xtensa_lx_CPU *CPU, uint32_t address, void *context)
+{
+   uint32_t value = 0;
+   uint8_t *rom = (uint8_t *)context;
+   if (address >= 0x180)
+   {
+      printf("\nTest Code:attempt to read from an unimplemented area %8X returning a 0.\n", address);
+   }
+   else
+   {
+      value = rom[address];
+   }
+   return value;
+}
+
+void writeMemory(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, void *context)
+{
+   printf("\nTest Code:attempt to write to an unimplemented area in memory %8X with the value %8X value will not be written.\n", address, value);
+}
 void processInstruction(Xtensa_lx_CPU *CPU, uint8_t rom[ROM_SIZE])
 {
    // First looks at write bit to determine if the CPU is intending to write
@@ -19,16 +38,18 @@ void processInstruction(Xtensa_lx_CPU *CPU, uint8_t rom[ROM_SIZE])
       for (int i = 0; i < 4; i++)
       {
          CPU->dataBus = CPU->dataBus << 8;
-         CPU->dataBus = CPU->dataBus | rom[CPU->addressLines];
+         CPU->dataBus = CPU->dataBus | rom[CPU->addressLines + i];
       }
       // now that the databus is set the cpu is ready to execute the instruction
+      xten_executeNext(CPU);
+      xten_displayCPU(CPU);
    }
 }
 
 int main(int argc, char *argv[])
 {
    // create a new xtensa CPU
-   Xtensa_lx_CPU CPU = xten_createCPU();
+   Xtensa_lx_CPU *CPU = xten_createCPU(readMemory, writeMemory);
 
    // set any chip development parameters
 
@@ -38,7 +59,7 @@ int main(int argc, char *argv[])
    // attach any gpio style stuff
 
    // load program into memory at 0x00
-   FILE *romFile = fopen("machine_code.m", "rb");
+   FILE *romFile = fopen("load_test.m", "rb");
    if (romFile == NULL)
    {
       printf("Issues with opening the rom file!");
@@ -48,10 +69,13 @@ int main(int argc, char *argv[])
       fread(rom, 1, 0x180, romFile);
       fclose(romFile);
 
-      // execute loop
-
       // test prints
-      xten_displayCPU(&CPU);
+      xten_displayCPU(CPU);
+      // execute loop
+      for (int i = 0; i < 5; i++)
+      {
+         processInstruction(CPU, rom);
+      }
    }
    return 0;
 }

@@ -1959,7 +1959,7 @@ extern "C"
                 // aligned byte address(should not happen in this core architecture)
                 // SAR = 0||AR[s]1..0||0^3
                 printf("\n\tThe instruction is SSA8L\n");
-                CPU->sar = (as & 0x3) << 3;
+                CPU->sar = (CPU->registerFile[CPU->windowOffset + s] & 0x3) << 3;
                 break;
             case 0x3:
                 // SSA8B     use low 2 bits of address register to prepare SAR for SRC assuming big endian       RRR (The B is for Big endian)
@@ -1971,7 +1971,7 @@ extern "C"
                 // address(should have no unaligned byte addresses in this core architecture)
                 // SAR = 32 - (0||AR[s]1..0||0^3)
                 printf("\n\tThe instruction is SSA8B\n");
-                CPU->sar = 32 - ((as & 0x3) << 3);
+                CPU->sar = 32 - ((CPU->registerFile[CPU->windowOffset + s] & 0x3) << 3);
                 break;
             case 0x4:
                 // SRAI      shift right logical by immediate                                                    RRR
@@ -2030,7 +2030,7 @@ extern "C"
                 // AR[r] = (AR[s]||AR[t]) 31+sa..sa
                 printf("\n\tThe instruction is SRC\n");
                 {
-                    uint64_t concat = ((uint64_t)as << 32) | at;
+                    uint64_t concat = ((uint64_t)CPU->registerFile[CPU->windowOffset + s] << 32) | CPU->registerFile[CPU->windowOffset + t];
                     CPU->registerFile[CPU->windowOffset + r] = concat >> CPU->sar;
                 }
                 break;

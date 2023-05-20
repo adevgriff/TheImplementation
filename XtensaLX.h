@@ -1650,79 +1650,171 @@ extern "C"
         }
     }
 
-    static inline void xten_coreArithmeticInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
+    static inline void xten_coreArithmeticInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO write tests
     {
-        // core arithmetic instructions are
-        /*********************************************************************/
-        // ADDI      add a register and an 8-bit immediate                                       RRI8
-        // calculates the two's complement 32-bit sum of as and constant in imm8 field assuming sign extended because it is useing twos complement
-        // the low 32 bits of the sum are written to address register at arithmetic overflow is not detected
-        // imm8 ranges from -128 to 127 and is sign-extended imm8
-        // 24 bit instruction
-        // AR[t] = AR[s] + (imm8 7 24||imm8)
-        //
-        // ADDMI     add a register and a shifted 8 bit immediate                                RRI8
-        // extends the range of constant additoin often used in conjunction with load and store instructions to extend teh range of the base, pluse
-        // offset the calculation.
-        // calculates the two's complement 32-bit sum of as and operan imm8. low 32 bits of the sum are written to at
-        // no arithmetic overflow is detected
-        // the operand encoded in the instruction can have values that are multiples of 256 ranging from -32768 to 32512
-        // that is decoded from a sign-extending imm8 and shifting the result left by eight bits
-        // AR[t] = AR[s] + (imm8 7 16||imm8||0^8)
-        //
-        // ADD       add two registers                                                           RRR
-        // calculates the two's complement 32-bit sum of as and at the low 32 bits are written to ar
-        // arithmetic overflow is not detected
-        // 24 bit instruction
-        // AR[r] = AR[s] + AR[t]
-        //
-        // ADDX2     add two registers with one shifted left by one                              RRR
-        // calculates the two's complement 32-bit sum of as shifted left by one bit and at the low 32bits of the sum are written to ar
-        // arithmetic overflow is not detected
-        // frequently used for address calculation and as part of sequences to bultiply by small constants
-        // AR[r] = (AR[s]30..0||0) + AR[t]
-        //
-        // ADDX4     add two registers with one shifted left by two                              RRR
-        // Calculates the two's complement 32-bit sum of as shifted left byyy two bits and address register at.
-        // low 32 bits of the sum are written to ar no arithmetic overflow detected. frequently used for address calculation and as part
-        // of a sequences to mulitply by small constants
-        // AR[r] = (AR[s] 29..0||0^2) + AR[t]
-        //
-        // ADDX8     add two registers with one shifted left by three                            RRR
-        // calculates teh two's complement 32 bit sum of as shifted left by 3 bits and address register at
-        // low 32 bit of the sum are written to ar no arithmetic overflow detected
-        // frequently used for address calculation and part of multiplcation sequence for small constants
-        // AR[r] = (AR[s] 28..0||0^3) + AR[t]
-        //
-        // SUB       subtract two registers                                                      RRR
-        // calculates the two's complement 32 bit difference of as and at the low 32 bits of difference are written to address register ar
-        // no arithmetic overflow detected
-        // AR[t] = AR[s] - AR[t]
-        //
-        // SUBX2     subtract two registers with the un-negated one shifted left by one          RRR
-        // calculates the two's complement 32-bit difference of as shifted left byy 1 bit and at. low 32 bits written to ar
-        // no arithmetic overflow detected
-        // frequently used as part of sequences to multiply byy small constants
-        // AR[r] = (AR[s] 30..0||0) - AR[t]
-        //
-        // SUBX4     subtract two registers with the un-negated one shifted left by two          RRR
-        // calculates the two's complement 32-bit difference of as shifted left by two bits and at. low 32 bits of the difference are written to ar
-        // no arithmetic overflow detected. frequently used for sequences to multiply by small constants
-        // AR[r] = (AR[s] 29..0||0^2) - AR[t]
-        //
-        // SUBX8     subtract two registers with the un-negated one shifted left by three        RRR
-        // calculates the two's complement 32-bit difference of as shifted left by 3 bits and at
-        // low 32 bits are written to ar no arithmetic overflow detected
-        // AR[r] = (AR[s] 28..0||0^3) - AR[t]
-        //
-        // NEG       negate a register                                                           RRR
-        // calculates the two's complement negation of the contents of at and writes it to ar no arithmetic overflow detected.
-        // AR[r] = 0 - AR[t]
-        //
-        // ABS       absolute value                                                              RRR
-        // calculates the absolute value of contents of at and writes it to ar no arithmetic overflow detected
-        // AR[r] = if AR[t] 31 then - AR[t] else AR[t]
-        //
+        uint32_t op0 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
+        uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
+        uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+        uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
+        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 0 : 20)) & 0x0F;
+
+        if (op0 == 0x2)
+        {
+            if (r == 0xC)
+            {
+                // ADDI      add a register and an 8-bit immediate                                       RRI8
+                // calculates the two's complement 32-bit sum of as and constant in imm8 field assuming sign extended because it is useing twos complement
+                // the low 32 bits of the sum are written to address register at arithmetic overflow is not detected
+                // imm8 ranges from -128 to 127 and is sign-extended imm8
+                // 24 bit instruction
+                // AR[t] = AR[s] + (imm8 7 24||imm8)
+                printf("\n\tThe instruction is ADDI\n");
+            }
+            else if (r == 0XD)
+            {
+                // ADDMI     add a register and a shifted 8 bit immediate                                RRI8
+                // extends the range of constant additoin often used in conjunction with load and store instructions to extend teh range of the base, pluse
+                // offset the calculation.
+                // calculates the two's complement 32-bit sum of as and operan imm8. low 32 bits of the sum are written to at
+                // no arithmetic overflow is detected
+                // the operand encoded in the instruction can have values that are multiples of 256 ranging from -32768 to 32512
+                // that is decoded from a sign-extending imm8 and shifting the result left by eight bits
+                // AR[t] = AR[s] + (imm8 7 16||imm8||0^8)
+                printf("\n\tThe instruction is ADDMI\n");
+            }
+            else
+            {
+                printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+            }
+        }
+        else if (op0 == 0x0)
+        {
+            switch (op2)
+            {
+            case 0x8:
+                // ADD       add two registers                                                           RRR
+                // calculates the two's complement 32-bit sum of as and at the low 32 bits are written to ar
+                // arithmetic overflow is not detected
+                // 24 bit instruction
+                // AR[r] = AR[s] + AR[t]
+                printf("\n\tThe instruction is ADD\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + r] = as + at;
+                break;
+            case 0x9:
+                // ADDX2     add two registers with one shifted left by one                              RRR
+                // calculates the two's complement 32-bit sum of as shifted left by one bit and at the low 32bits of the sum are written to ar
+                // arithmetic overflow is not detected
+                // frequently used for address calculation and as part of sequences to bultiply by small constants
+                // AR[r] = (AR[s]30..0||0) + AR[t]
+                printf("\n\tThe instruction is ADDX2\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                as = as << 1;
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + r] = as + at;
+                break;
+            case 0xA:
+                // ADDX4     add two registers with one shifted left by two                              RRR
+                // Calculates the two's complement 32-bit sum of as shifted left by two bits and address register at.
+                // low 32 bits of the sum are written to ar no arithmetic overflow detected. frequently used for address calculation and as part
+                // of a sequences to mulitply by small constants
+                // AR[r] = (AR[s] 29..0||0^2) + AR[t]
+                printf("\n\tThe instruction is ADDX4\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                as = as << 2;
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + r] = as + at;
+                break;
+            case 0xB:
+                // ADDX8     add two registers with one shifted left by three                            RRR
+                // calculates teh two's complement 32 bit sum of as shifted left by 3 bits and address register at
+                // low 32 bit of the sum are written to ar no arithmetic overflow detected
+                // frequently used for address calculation and part of multiplcation sequence for small constants
+                // AR[r] = (AR[s] 28..0||0^3) + AR[t]
+                printf("\n\tThe instruction is ADDX8\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                as = as << 3;
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + r] = as + at;
+                break;
+            case 0xC:
+                // SUB       subtract two registers                                                      RRR
+                // calculates the two's complement 32 bit difference of as and at the low 32 bits of difference are written to address register ar
+                // no arithmetic overflow detected
+                // AR[r] = AR[s] - AR[t]
+                printf("\n\tThe instruction is SUB\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + r] = as - at;
+                break;
+            case 0xD:
+                // SUBX2     subtract two registers with the un-negated one shifted left by one          RRR
+                // calculates the two's complement 32-bit difference of as shifted left byy 1 bit and at. low 32 bits written to ar
+                // no arithmetic overflow detected
+                // frequently used as part of sequences to multiply byy small constants
+                // AR[r] = (AR[s] 30..0||0) - AR[t]
+                printf("\n\tThe instruction is SUBX2\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                as = as << 1;
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + r] = as - at;
+                break;
+            case 0xE:
+                // SUBX4     subtract two registers with the un-negated one shifted left by two          RRR
+                // calculates the two's complement 32-bit difference of as shifted left by two bits and at. low 32 bits of the difference are written to ar
+                // no arithmetic overflow detected. frequently used for sequences to multiply by small constants
+                // AR[r] = (AR[s] 29..0||0^2) - AR[t]
+                printf("\n\tThe instruction is SUBX4\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                as = as << 2;
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + r] = as - at;
+                break;
+            case 0xF:
+                // SUBX8     subtract two registers with the un-negated one shifted left by three        RRR
+                // calculates the two's complement 32-bit difference of as shifted left by 3 bits and at
+                // low 32 bits are written to ar no arithmetic overflow detected
+                // AR[r] = (AR[s] 28..0||0^3) - AR[t]
+                printf("\n\tThe instruction is SUBX8\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                as = as << 3;
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + r] = as - at;
+                break;
+            case 0x6:
+                if (s == 0x0)
+                {
+                    // NEG       negate a register                                                           RRR
+                    // calculates the two's complement negation of the contents of at and writes it to ar no arithmetic overflow detected.
+                    // AR[r] = 0 - AR[t]
+                    printf("\n\tThe instruction is NEG\n");
+                    int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                    CPU->registerFile[CPU->windowOffset + r] = -at;
+                }
+                else if (s == 0x1)
+                {
+                    // ABS       absolute value                                                              RRR
+                    // calculates the absolute value of contents of at and writes it to ar no arithmetic overflow detected
+                    // AR[r] = if AR[t] 31 then - AR[t] else AR[t]
+                    printf("\n\tThe instruction is ABS\n");
+                    int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                    CPU->registerFile[CPU->windowOffset + r] = abs(at);
+                }
+                else
+                {
+                    printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+                }
+                break;
+            default:
+                printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+                break;
+            }
+        }
+        else
+        {
+            printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+        }
     }
 
     static inline void xten_coreBitwiseLogicalInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)

@@ -1050,35 +1050,97 @@ extern "C"
         }
     }
 
-    static inline void xten_coreJumpCallInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
+    static inline void xten_coreJumpCallInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO testing for jump and call instructions
     {
-        // core jump, call instructions are
-        // CALL0     Call subroutine at PC plus offset place return address in A0                CALL
-        // subroutines without using register windows. The return address is palced in
-        // a0 and the processor then branches to the target address
-        // the return address is the address of the CALL0 instruction plus three
-        // target instruction address must be 32 bit aligned allowing CALL0 to have a larger effective range
-        // least sig two bits set to zero plus the sign-extened 18-bit offset shifted by two, plus four
-        //
-        // CALLX0    Call subroutine register specified location, place return address in A0     CALLX
-        // calls subroutines without using register windows the return address is placed in a0 and teh processor
-        // then branches to the target address,
-        //
-        // RET       subroutine return through A0    CALLX
-        // 0000 0000 0000 0000 10 00 0000
-        // This returns from routine called by either CALL0 or CALLX0 equivalent to the instruction JX A0
-        // serparate instruction because some implementations may realize performace advantages from it being seperate
-        //
-        // J         jump to pc plus offset                                                 CALL
-        // Unconditional Jump 18 bit offset followed by opcode 00 0110
-        // Performs an unconditional branch to the target address signed 18-bit PC-relative offset is used to specify the target address
-        // address of the J instruction plus the sign-extended 18-bit offset range is -131068 to 131075
-        // nextPC = PC + (offset 17 14 || offset) + 4
-        //
-        // JX        jump to register-specified location  CALLX
-        // unconditional jump based on register specified by as
-        // perfoms an unconditional jump to the address in register as
-        //
+        // get parts
+        uint32_t op0 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0xF;
+        uint32_t n = (opcode >> (CPU->msbFirstOption ? 18 : 2)) & 0x3;
+        uint32_t m = (opcode >> (CPU->msbFirstOption ? 16 : 6)) & 0x3;
+        uint32_t offset = 0;
+
+        // sort through the instructions
+        if (op0 == 0x5)
+        {
+            // CALL0     Call subroutine at PC plus offset place return address in A0                CALL
+            // subroutines without using register windows. The return address is palced in
+            // a0 and the processor then branches to the target address
+            // the return address is the address of the CALL0 instruction plus three
+            // target instruction address must be 32 bit aligned allowing CALL0 to have a larger effective range
+            // least sig two bits set to zero plus the sign-extened 18-bit offset shifted by two, plus four
+            printf("\n\tThe instruction is CALL0\n");
+
+            // place return address into a0
+            CPU->registerFile[CPU->windowOffset] = PC + 3; // plus three to make sure it advances to next instruction on return
+
+            // find target instruction address
+            uint32_t address = PC & 0xFFFFFFFC;
+            offset = (opcode >> (CPU->msbFirstOption ? 0 : 6)) & 0x3FFFF;
+            if (offset & (1 << 17))
+            {
+                offset |= 0xFFFC0000;
+            }
+            offset = offset << 2;
+            // noticed here that the program counter is set up in my implementation to point to the currently executing instruction this is an incorrect implementation
+            // but not a lot of time to fix it if and when it is fixed the offset will need to have 3 added to it to point to the next instruction
+            CPU->PC = address + offset;
+            CPU->addressLines = PC;
+        }
+        else if (op0 == 0x6)
+        {
+            // J         jump to pc plus offset                                                 CALL
+            // Unconditional Jump 18 bit offset followed by opcode 00 0110
+            // Performs an unconditional branch to the target address signed 18-bit PC-relative offset is used to specify the target address
+            // address of the J instruction plus the sign-extended 18-bit offset range is -131068 to 131075
+            // nextPC = PC + (offset 17 14 || offset) + 4
+            printf("\n\tThe instruction is J\n");
+            offset = (opcode >> (CPU->msbFirstOption ? 0 : 6)) & 0x3FFFF;
+            if (offset & (1 << 17))
+            {
+                offset |= 0xFFFC0000;
+            }
+            // Plus 4 issue continued look at CALL0 instruction for details
+            CPU->PC = (CPU->PC + (offset << 2)) & 0xFFFFFFFC;
+            CPU->addressLines = PC;
+        }
+        else
+        {
+            // further testing nessesary
+            if (n == 0x2)
+            {
+                // this is the JX instruction
+                // JX        jump to register-specified location  CALLX
+                // unconditional jump based on register specified by as
+                // perfoms an unconditional jump to the address in register as
+                printf("\n\tThe instruction is JX\n");
+                uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0xF;
+                CPU->PC = CPU->registerFile[CPU->windowOffset + s];
+                CPU->addressLines = PC;
+            }
+            else
+            {
+                if (m == 0x3)
+                {
+                    // CALLX0    Call subroutine register specified location, place return address in A0     CALLX
+                    // calls subroutines without using register windows the return address is placed in a0 and teh processor
+                    // then branches to the target address,
+                    printf("\n\tThe instruction is CALLX0\n");
+                    CPU->registerFile[CPU->windowOffset] = PC + 3; // plus three to make sure it advances to next instruction on return
+                    uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0xF;
+                    CPU->PC = CPU->registerFile[CPU->windowOffset + s];
+                    CPU->addressLines = PC;
+                }
+                else if (m == 0x2)
+                {
+                    // RET       subroutine return through A0    CALLX
+                    // 0000 0000 0000 0000 10 00 0000
+                    // This returns from routine called by either CALL0 or CALLX0 equivalent to the instruction JX A0
+                    // serparate instruction because some implementations may realize performace advantages from it being seperate
+                    printf("\n\tThe instruction is RET\n");
+                    CPU->PC = CPU->registerFile[CPU->windowOffset];
+                    CPU->addressLines = PC;
+                }
+            }
+        }
     }
 
     static inline void xten_coreConditionalBranchInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)

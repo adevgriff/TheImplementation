@@ -17,3 +17,7 @@ core_memoryOrdering_instructions_test.M
 both of the instructions in this section are essentailly operating as no-ops so all that is being tested is that they are decoded properly
 first instruction should be MEMW
 next should be EXTW
+
+increment_zero_test.m 
+this code should load 1 into register 0 and endlessly increment it jumping back to the add instruction 
+

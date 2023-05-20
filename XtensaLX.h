@@ -604,7 +604,7 @@ extern "C"
             }
             break;
         case 0x3:
-            if (r >> 1 == 0xc)
+            if (r == 0xc)
             {
                 xten_coreArithmeticInstructions(CPU, opcode);
             }
@@ -1106,7 +1106,7 @@ extern "C"
                 offset |= 0xFFFC0000;
             }
             // Plus 4 issue continued look at CALL0 instruction for details
-            CPU->PC = ((CPU->PC + (offset << 2)) & 0xFFFFFFFC) - 3; // CPU->PC will increment by 3 at the end of the instruction
+            CPU->PC = CPU->PC + offset - 3; // CPU->PC will increment by 3 at the end of the instruction
             CPU->addressLines = CPU->PC;
         }
         else
@@ -1715,6 +1715,9 @@ extern "C"
                 // 24 bit instruction
                 // AR[t] = AR[s] + (imm8 7 24||imm8)
                 printf("\n\tThe instruction is ADDI\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                int8_t imm8 = (opcode >> (int8_t)((CPU->msbFirstOption ? 0 : 20)) & 0x0F);
+                CPU->registerFile[CPU->windowOffset + t] = as + imm8;
             }
             else if (r == 0XD)
             {

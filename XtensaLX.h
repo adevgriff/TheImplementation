@@ -119,7 +119,7 @@ extern "C"
         // may result in an execute next with a flag set to do a process other then decoding and executing an instruction
         // this is to allow the user to process certain stages in the pipeline for the instruction that may require such processing
         // like writing to or reading data from memory.
-        // increment the PC and address appropriately
+        // increment the CPU->PC and address appropriately
         CPU->PC += 3;
         CPU->addressLines = CPU->PC;
     }
@@ -264,7 +264,7 @@ extern "C"
         resultingCPU->configurable = true;             // new CPU is still configureable
         resultingCPU->chipEnable = XTEN_HIGH;          // chip enabled by default
         resultingCPU->write = XTEN_LOW;                // chip not writing the first clock cycle
-        resultingCPU->addressLines = resultingCPU->PC; // starting at PC address
+        resultingCPU->addressLines = resultingCPU->PC; // starting at CPU->PC address
         resultingCPU->dataBus = 0;                     // this is simply to initialize it to something
 
         resultingCPU->readMemory = readMemory;           // user defined function that handles the memory access portion of the pipeline the way the user defines
@@ -315,7 +315,7 @@ extern "C"
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
 #ifdef XTEN_DEBUGGING_DETAILED
-        printf("At PC %X opcode %X op0 was found to be %X:\n", CPU->PC, opcode, op0);
+        printf("At CPU->PC %X opcode %X op0 was found to be %X:\n", CPU->PC, opcode, op0);
 #endif
         switch (op0 >> 2)
         {
@@ -400,7 +400,7 @@ extern "C"
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
 #ifdef XTEN_DEBUGGING_DETAILED
-        printf("\tAt PC %X opcode %X op1 was found to be %X:\n", CPU->PC, opcode, op1);
+        printf("\tAt CPU->PC %X opcode %X op1 was found to be %X:\n", CPU->PC, opcode, op1);
 #endif
         switch (op1 >> 2)
         {
@@ -485,7 +485,7 @@ extern "C"
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
 #ifdef XTEN_DEBUGGING_DETAILED
-        printf("\tAt PC %X opcode %X n was found to be %X:\n", CPU->PC, opcode, n);
+        printf("\tAt CPU->PC %X opcode %X n was found to be %X:\n", CPU->PC, opcode, n);
 #endif
         if (n == 0x0)
         {
@@ -516,7 +516,7 @@ extern "C"
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
 #ifdef XTEN_DEBUGGING_DETAILED
-        printf("\tAt PC %X opcode %X n was found to be %X:\n", CPU->PC, opcode, n);
+        printf("\tAt CPU->PC %X opcode %X n was found to be %X:\n", CPU->PC, opcode, n);
 #endif
         if (n == 0x0)
         {
@@ -547,7 +547,7 @@ extern "C"
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
 #ifdef XTEN_DEBUGGING_DETAILED
-        printf("\tAt PC %X opcode %X r was found to be %X:\n", CPU->PC, opcode, r);
+        printf("\tAt CPU->PC %X opcode %X r was found to be %X:\n", CPU->PC, opcode, r);
 #endif
         switch (r >> 2)
         {
@@ -635,7 +635,7 @@ extern "C"
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
 #ifdef XTEN_DEBUGGING_DETAILED
-        printf("\tAt PC %X opcode %X op2 was found to be %X:\n", CPU->PC, opcode, op2);
+        printf("\tAt CPU->PC %X opcode %X op2 was found to be %X:\n", CPU->PC, opcode, op2);
 #endif
         switch (op2 >> 2)
         {
@@ -761,7 +761,7 @@ extern "C"
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
 #ifdef XTEN_DEBUGGING_DETAILED
-        printf("\tAt PC %X opcode %X op2 was found to be %X:\n", CPU->PC, opcode, op2);
+        printf("\tAt CPU->PC %X opcode %X op2 was found to be %X:\n", CPU->PC, opcode, op2);
 #endif
         switch (op2 >> 2)
         {
@@ -828,7 +828,7 @@ extern "C"
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
 #ifdef XTEN_DEBUGGING_DETAILED
-        printf("\tAt PC %X opcode %X op2 was found to be %X:\n", CPU->PC, opcode, op2);
+        printf("\tAt CPU->PC %X opcode %X op2 was found to be %X:\n", CPU->PC, opcode, op2);
 #endif
         switch (op2 >> 2)
         {
@@ -895,9 +895,9 @@ extern "C"
         uint32_t op0 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
         if (op0 == 0x1)
         {
-            // L32R      load literal at offset from PC(32 bit load pc relative(16 bit negative word offset))   RI16
+            // L32R      load literal at offset from CPU->PC(32 bit load CPU->PC relative(16 bit negative word offset))   RI16
             // major opcode 0001     no sub opcode for this one
-            // PC relative 32 bit load
+            // CPU->PC relative 32 bit load
             // address formed by adding 16 bit one extended constant value shifted left by two
             // to teh address of teh L32R plus three with the two least significant bits cleared
             // specifies 32-bit aligned addresses from -262141 to -4 bytes from the address of teh L32R instruction
@@ -1064,7 +1064,7 @@ extern "C"
         // sort through the instructions
         if (op0 == 0x5)
         {
-            // CALL0     Call subroutine at PC plus offset place return address in A0                CALL
+            // CALL0     Call subroutine at CPU->PC plus offset place return address in A0                CALL
             // subroutines without using register windows. The return address is palced in
             // a0 and the processor then branches to the target address
             // the return address is the address of the CALL0 instruction plus three
@@ -1073,10 +1073,10 @@ extern "C"
             printf("\n\tThe instruction is CALL0\n");
 
             // place return address into a0
-            CPU->registerFile[CPU->windowOffset] = PC + 3; // plus three to make sure it advances to next instruction on return
+            CPU->registerFile[CPU->windowOffset] = CPU->PC + 3; // plus three to make sure it advances to next instruction on return
 
             // find target instruction address
-            uint32_t address = PC & 0xFFFFFFFC;
+            uint32_t address = CPU->PC & 0xFFFFFFFC;
             offset = (opcode >> (CPU->msbFirstOption ? 0 : 6)) & 0x3FFFF;
             if (offset & (1 << 17))
             {
@@ -1085,16 +1085,16 @@ extern "C"
             offset = offset << 2;
             // noticed here that the program counter is set up in my implementation to point to the currently executing instruction this is an incorrect implementation
             // but not a lot of time to fix it if and when it is fixed the offset will need to have 3 added to it to point to the next instruction
-            CPU->PC = address + offset - 3; // PC will increment by 3 at the end of the instruction
-            CPU->addressLines = PC;
+            CPU->PC = address + offset - 3; // CPU->PC will increment by 3 at the end of the instruction
+            CPU->addressLines = CPU->PC;
         }
         else if (op0 == 0x6)
         {
-            // J         jump to pc plus offset                                                 CALL
+            // J         jump to CPU->PC plus offset                                                 CALL
             // Unconditional Jump 18 bit offset followed by opcode 00 0110
-            // Performs an unconditional branch to the target address signed 18-bit PC-relative offset is used to specify the target address
+            // Performs an unconditional branch to the target address signed 18-bit CPU->PC-relative offset is used to specify the target address
             // address of the J instruction plus the sign-extended 18-bit offset range is -131068 to 131075
-            // nextPC = PC + (offset 17 14 || offset) + 4
+            // nextPC = CPU->PC + (offset 17 14 || offset) + 4
             printf("\n\tThe instruction is J\n");
             offset = (opcode >> (CPU->msbFirstOption ? 0 : 6)) & 0x3FFFF;
             if (offset & (1 << 17))
@@ -1102,8 +1102,8 @@ extern "C"
                 offset |= 0xFFFC0000;
             }
             // Plus 4 issue continued look at CALL0 instruction for details
-            CPU->PC = ((CPU->PC + (offset << 2)) & 0xFFFFFFFC) - 3; // PC will increment by 3 at the end of the instruction
-            CPU->addressLines = PC;
+            CPU->PC = ((CPU->PC + (offset << 2)) & 0xFFFFFFFC) - 3; // CPU->PC will increment by 3 at the end of the instruction
+            CPU->addressLines = CPU->PC;
         }
         else
         {
@@ -1116,8 +1116,8 @@ extern "C"
                 // perfoms an unconditional jump to the address in register as
                 printf("\n\tThe instruction is JX\n");
                 uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0xF;
-                CPU->PC = CPU->registerFile[CPU->windowOffset + s] - 3; // PC will increment by 3 at the end of the instruction
-                CPU->addressLines = PC;
+                CPU->PC = CPU->registerFile[CPU->windowOffset + s] - 3; // CPU->PC will increment by 3 at the end of the instruction
+                CPU->addressLines = CPU->PC;
             }
             else
             {
@@ -1127,10 +1127,10 @@ extern "C"
                     // calls subroutines without using register windows the return address is placed in a0 and teh processor
                     // then branches to the target address,
                     printf("\n\tThe instruction is CALLX0\n");
-                    CPU->registerFile[CPU->windowOffset] = PC + 3; // plus three to make sure it advances to next instruction on return
+                    CPU->registerFile[CPU->windowOffset] = CPU->PC + 3; // plus three to make sure it advances to next instruction on return
                     uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0xF;
-                    CPU->PC = CPU->registerFile[CPU->windowOffset + s] - 3; // PC will increment by 3 at the end of the instruction
-                    CPU->addressLines = PC;
+                    CPU->PC = CPU->registerFile[CPU->windowOffset + s] - 3; // CPU->PC will increment by 3 at the end of the instruction
+                    CPU->addressLines = CPU->PC;
                 }
                 else if (m == 0x2)
                 {
@@ -1139,8 +1139,8 @@ extern "C"
                     // This returns from routine called by either CALL0 or CALLX0 equivalent to the instruction JX A0
                     // serparate instruction because some implementations may realize performace advantages from it being seperate
                     printf("\n\tThe instruction is RET\n");
-                    CPU->PC = CPU->registerFile[CPU->windowOffset] - 3; // PC will increment by 3 at the end of the instruction
-                    CPU->addressLines = PC;
+                    CPU->PC = CPU->registerFile[CPU->windowOffset] - 3; // CPU->PC will increment by 3 at the end of the instruction
+                    CPU->addressLines = CPU->PC;
                 }
             }
         }
@@ -1149,7 +1149,7 @@ extern "C"
     static inline void xten_coreConditionalBranchInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO create code to test a subset at least of these branch instructions
     {
         // RRI8 is [4 bit major opcode][4 bit t AR target or source,BR target or Source, 4bit sub opcode][s 4 bit, AR source, BR source, AR target][r AR target, BR target, 4 bit immediate, 4-bit sub-opcode][imm8 8 bit immediate]
-        // most of these functions as they branch to other parts of the program are going to have plus 4 errors stemming from the lack of correct PC assignment
+        // most of these functions as they branch to other parts of the program are going to have plus 4 errors stemming from the lack of correct CPU->PC assignment
         uint32_t op0 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
         uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
         uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
@@ -1173,9 +1173,9 @@ extern "C"
                 // by taking bitwise logical and of as with at and testing if result is zero
                 // target is BNONE address plus the sign-extended imm8 plus 4 if any of the masked bits are set execution continues
                 // with the next sequential instruction
-                // if (AR[s] and AR[t]) = 0^32 then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if (AR[s] and AR[t]) = 0^32 then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BNONE\n");
-                if (CPU->registerFile[CPU->windowOffset + s] & CPU->registerFile[CPU->windowOffset + t] == 0x0)
+                if ((CPU->registerFile[CPU->windowOffset + s] & CPU->registerFile[CPU->windowOffset + t]) == 0x0)
                 {
                     willBranch8 = true;
                 }
@@ -1185,7 +1185,7 @@ extern "C"
                 // branches if address registers as and at are equal
                 // target instruction is address of the BEQ instruction plus the sign-extended 8-bit imm8 field of the instruction
                 // plus 4. if registers are not equal execution continues with the next sequential instruction
-                // if AR[s] = AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] = AR[t] then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BEQ\n");
                 if (CPU->registerFile[CPU->windowOffset + s] == CPU->registerFile[CPU->windowOffset + t])
                 {
@@ -1193,11 +1193,12 @@ extern "C"
                 }
                 break;
             case 0x2:
+            {
                 // BLT       branch if one register is less than a register                                          RRI8
                 // branches if address register as is two's complement less than address register at
                 // target is address of BLT plus sign-extended imm8 plus 4 if as greater than or equal to at execution continues
                 // with next sequential instruction
-                // if AR[s] < AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] < AR[t] then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BLT\n");
                 int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
@@ -1206,13 +1207,15 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0x3:
+            {
                 // BLTU      branch if one register is less than a register as unsigned                              RRI8
                 // branches if as is unsigned less thna at
                 // target is BLTU addres plus sign-extended imm8 plus four if as is greater than or equal to at execution continues
                 // with the next sequential instruction
-                // if (0||AR[s]) < (0||AR[t]) then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if (0||AR[s]) < (0||AR[t]) then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BLTU\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t at = CPU->registerFile[CPU->windowOffset + t];
@@ -1221,31 +1224,35 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0x4:
+            {
                 // BALL      branch if all bits specified by a mask in one register are set in another register      RRI8
                 // branches if all bits specified by the mask in address register at are set in address register as
                 // test performed by taking bitwise logical and of at and the complement of as and seeing if result is zero
                 // target address is address of the BALL instruction plus the sign-extended 8-bit imm8 plus four if any
                 // masked bits are clear execution continus with next sequential instruction
-                // if((not AR[s]) and AR[t]) = 0^32 then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if((not AR[s]) and AR[t]) = 0^32 then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BALL\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t at = CPU->registerFile[CPU->windowOffset + t];
 
-                if (at & ~as == 0)
+                if ((at & ~as) == 0)
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0x5:
+            {
                 // BBC       branch if the bit specified by antoher register is clear                                RRI8
                 // branches if teh bit specified by the low five bits of address register at is clear in addreses register as
                 // for little-endian bit 0 is least significant bit and bi endian bit 0 is most significant bit
                 // target instruction address of the branch is given bay address of BBC instruction plus the sign-extended 8-bit imm8
                 // field plus four if specified bit is set execution continues with the next sequential instruction
                 // b = AR[t]4..0 xor msbFirst^5
-                // if AR[s] b = 0 then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] b = 0 then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BBC\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t at = CPU->registerFile[CPU->windowOffset + t];
@@ -1260,18 +1267,19 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-
-                break;
+            }
+            break;
             case 0x6:
                 // break omitted because implementation same as the instruction below
             case 0x7:
+            {
                 // BBCI      branch if the bit specified by an immediate is clear                                    RRI8
                 // branches if specified by constant encoded in bbi field is clear in address register as
                 // bbi field is split with bits 3..0 in bits 7..4 of the instruction word, and bit 4 in bit 12 of the instruction
                 // word. target address given by address of the BBCI instruction plus sign-extended 8-bit imm8 field of the instruction
                 // plus 4. If the specified bit is set, execution continues with the next sequential instruction.
                 // b = bbi xor msbFirst^5
-                // if AR[s] b = 0 then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] b = 0 then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BBCI\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t bbi4_0 = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F; // bbi bits 3..0
@@ -1286,28 +1294,32 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0x8:
+            {
                 // BANY      branch if any bits specified by a mask in one register are set in another register      RRI8
                 // branches if any of the bits specified by mask in address register at are set in address register as
                 // tested by bitwise logical and of as and at and testing if result is non-zero
                 // target address given by address of BANY plus the sign-extended 8-bit imm8 field of the instruction plus
                 // four if all masked bits are clear execution continues with the next sequential instruction
-                // if(AR[s] and AR[t]) != 0^32 then nextPC = PC+(imm8 7 24||imm8) + 4
+                // if(AR[s] and AR[t]) != 0^32 then nextPC = CPU->PC+(imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BANY\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t at = CPU->registerFile[CPU->windowOffset + t];
-                if (as & at != 0)
+                if ((as & at) != 0)
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0x9:
+            {
                 // BNE       branch if a register does not equal a register                                          RRI8
                 // branches if as and at are not equal
                 // target address is BNE address plus sign-extended imm8 plus 4 if the registers are equal execution continues with the next
                 // sequential instruction
-                // if AR[s] != AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] != AR[t] then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BNE\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t at = CPU->registerFile[CPU->windowOffset + t];
@@ -1315,13 +1327,15 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0xA:
+            {
                 // BGE       branch if a register is greater than or equal to a register                             RRI8
                 // branches if address as is two's complement greater then or equal ot address at register at
                 // target is BGE instruction address pluse sign-extended imm8 plus four.
                 // if as is less than at execution continues with next sequential instruction
-                // if AR[s] >= AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] >= AR[t] then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BGE\n");
                 int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
@@ -1329,14 +1343,15 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-
-                break;
+            }
+            break;
             case 0xB:
+            {
                 // BGEU      branch if one register is greater than or equal to a register as unsigned               RRI8
                 //  branches if as is unsigned greater then or equal to address register at
                 // target address is BGEU address plus sign-extended imm8 plus 4 if as is less than at execution continues with next
                 // sequential instruction.
-                // if (0||AR[s]) >= (0||AR[t]) then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if (0||AR[s]) >= (0||AR[t]) then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BGEU\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t at = CPU->registerFile[CPU->windowOffset + t];
@@ -1344,14 +1359,16 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0xC:
+            {
                 // BNALL     branch if some bits specified by a mask in a register are clear in another register     RRI8
                 // branches if any of the bits specified by the mask in at are clear in as(if they are not all set). test
                 // is performed by taking the bitwise logical and of at with the complement of as and testing if result is non-zero
                 // target is BNALL address plus sign-extended 8-bit imm8 plus 4 if all masked bits are set execution continues
                 // with the next sequential instruction
-                // if((not AR[s]) and AR[t]) != 0 ^32 then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if((not AR[s]) and AR[t]) != 0 ^32 then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BNALL\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t at = CPU->registerFile[CPU->windowOffset + t];
@@ -1359,14 +1376,16 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0xD:
+            {
                 // BBS       branch if the bit specified by another register is set                                  RRI8
                 // brances if the bit specified by the low five bits of address register at is set in address reigister as
                 // target address is the address of the BBS instruction plus the sign-extended 8-bit imm8 field of the instruction
                 // plus four. if the specified bit is clear, execution continues with the next sequential instruction
                 // b = AR[t] 4..0 xor msbFirst^5
-                // if AR[s]b != 0 then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s]b != 0 then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BBS\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t at = CPU->registerFile[CPU->windowOffset + t];
@@ -1375,10 +1394,12 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0xE:
                 // break omitted because implementation same as the instruction below
             case 0xF:
+            {
                 // BBSI      branch if the bit specified by an immediate is set                                      RRI8
                 // branches if the bit specified by the constant encoded in bbi field is set in address register as
                 // bbi field is split with bits 3..0 in bits 7..4 of the instruction word and bit 4 in bit 12 of the instruction word
@@ -1386,7 +1407,7 @@ extern "C"
                 // extended 8-bit imm8 field of the instruction plus four. if the specified bit is clear execution continues with the
                 // next sequential instruction.
                 // b = bbi xor msbFirst^5
-                // if AR[s]b != 0 then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s]b != 0 then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BBSI\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 uint32_t bbi4_0 = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F; // bbi bits 3..0
@@ -1401,7 +1422,8 @@ extern "C"
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             }
         }
         else if (op0 == 0x6)
@@ -1409,135 +1431,155 @@ extern "C"
             switch (t)
             {
             case 0x1:
+            {
                 // BEQZ      branch if a register equals zero                                                        BRI12
                 // branches if as is equal to zero provides 12 bits of target range instead of the 8 in most conditional
                 // branches target instruction address of the branch is given by the address of the BEQZ instruction plus
                 // the sign-exteneded 12 bit imm12 field of the instruction plus 4.
                 // if register as is not zero execution conintues with the next sequential instruction
-                // if AR[s] = 0^32 then nextPC = PC + (imm12 11 20||imm12) + 4
+                // if AR[s] = 0^32 then nextPC = CPU->PC + (imm12 11 20||imm12) + 4
                 printf("\n\tThe instruction is BEQZ\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if (as == 0)
                 {
                     willBranch12 = true;
                 }
-                break;
+            }
+            break;
             case 0x2:
+            {
                 // BEQI      branch if a register equals an encoded constant                                         RRI8
                 //  branches if as and constant encoded in the r field are equal
                 // constant values encoded in the r field are not simply 0..15. constant values encoded by r, see table 3-17 on page 41
                 // target instruction of the branch is given by address of BEQI instruction plus the sing-extended 8-bit imm8 field plus 4.
                 // if register is not equal to the constant execution continues with the next sequential instruction.
-                // if AR[s] = B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] = B4CONST(r) then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BEQI\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if (as == xten_table317[r])
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0x5:
+            {
                 // BNEZ      branch if a register does not equal zero                                            BRI12
                 // branches if as is not equal to zero 12 bit target range
                 // target is BNEZ instruction plus sign-extended imm12 plus 4 if register as equals zero execution continues
                 // with the next sequential instruction
-                // if AR[s] != 0 ^32 then nextPC = PC + (imm12 11 20||imm12) + 4
+                // if AR[s] != 0 ^32 then nextPC = CPU->PC + (imm12 11 20||imm12) + 4
                 printf("\n\tThe instruction is BNEZ\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if (as != 0)
                 {
                     willBranch12 = true;
                 }
-                break;
+            }
+            break;
             case 0x6:
+            {
                 // BNEI      branch if a register does not equal an encoded constant                                 RRI8
                 // branches if as and constant encoded in r field(see table 3-17 on page 41) are not equal. target address is
                 // BNEI address plus sign-extended imm8 plus 4. if register is equal to the constant, execution continues with the next sequential instruciton
-                // if AR[s] != B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] != B4CONST(r) then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BNEI\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if (as != xten_table317[r])
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0x9:
+            {
                 // BLTZ      branch if a register is less than zero                                                  BRI12
                 // branches if as is less than zero(most significant bit is set) 12 bit target range
                 // target is BLTZ address plus sign-extended imm12 plus 4 if as is greater than or equal to zero execution
                 // continues with the next sequential instruction.
-                // if AR[s]31 != 0 then nextPC = PC + (imm12 11 20||imm12) + 4
+                // if AR[s]31 != 0 then nextPC = CPU->PC + (imm12 11 20||imm12) + 4
                 printf("\n\tThe instruction is BLTZ\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if ((as & 0x80000000) != 0)
                 {
                     willBranch12 = true;
                 }
-                break;
+            }
+            break;
             case 0xA:
+            {
                 // BLTI      branch if one register is less than an encoded constant                                 RRI8
                 // branches if as is two's complement less than the constant encoded in r(see table 3-17 on page 41)
                 // target address is BLTI address plus sign-extended imm8 plus 4
                 // if as is greater than or equal to the constant execution continues with the next sequential instruction
-                // if AR[s] < B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] < B4CONST(r) then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BLTI\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if ((int32_t)as < (int32_t)xten_table317[r])
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0xB:
+            {
                 // BLTUI     branch if one register is less than an encoded constant as unsigned                     RRI8
                 // branches if as is unsigned less than the constant encoded in r field(see 3-18 on page 42)
                 // target is BLTUI address pluse sign-extended imm8 plus 4 if as is greater than or equal to the constant
                 // execution continues with the next sequential instruction
-                // if(0||AR[s]) < (0||B4CONSTU(r)) then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if(0||AR[s]) < (0||B4CONSTU(r)) then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BLTUI\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if (as < xten_table317[r])
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0xD:
+            {
                 // BGEZ      branch if a register is greater than or equal to zero                                   BRI12
                 // branches if as is greather than or equal to zero (most significant bit is clear). 12 bit target range instead of 8 in most branches
                 // target address is BGEZ address plus sign-extended imm12 plus 4 if register as is less than zero execution continues
                 // with next sequential instruction
-                // if AR[s]31 = 0 then nextPC = PC + (imm12 11 20||imm12) + 4
+                // if AR[s]31 = 0 then nextPC = CPU->PC + (imm12 11 20||imm12) + 4
                 printf("\n\tThe instruction is BGEZ\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if (as >= 0)
                 {
                     willBranch12 = true;
                 }
+            }
             case 0xE:
+            {
                 // BGEI      branch if a register is greater than or equal to an encoded constant                    RRI8
                 // branches if as is twos complement greater than or equal to the constant encoded in the r field (table3-17) on page 41
                 // target is address of BGEI instruction plus the sign-extended imm8 plus four if address register as is less
                 // than the constant execution continues with the next sequential instruction
-                // if AR[s] >= B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
+                // if AR[s] >= B4CONST(r) then nextPC = CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BGEI\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if ((int32_t)as >= (int32_t)xten_table317[r])
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             case 0xF:
+            {
                 // BGEUI     branch if one register is greater than or equal to an encoded constatnt as unsigned     RRI8
                 // branches if address register as is unsigned greater than or equal to the constant encoded in r(see table 3-18 on pg 42)
                 // target address is address of BGEUI plus sign-extended imm8 plus 4 if as less then constant execution continues
                 // with next sequential instruction
-                // if(-||AR[s]) >= (0||B4CONSTU(r)) then nextPC - PC + (imm8 7 24||imm8) + 4
+                // if(-||AR[s]) >= (0||B4CONSTU(r)) then nextPC - CPU->PC + (imm8 7 24||imm8) + 4
                 printf("\n\tThe instruction is BGEUI\n");
                 uint32_t as = CPU->registerFile[CPU->windowOffset + s];
                 if (as >= xten_table317[r])
                 {
                     willBranch8 = true;
                 }
-                break;
+            }
+            break;
             default:
                 printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
                 break;
@@ -1553,7 +1595,7 @@ extern "C"
             // branch to target
             offset = (int8_t)imm8;
             target = CPU->PC + ((int32_t)offset << 2);
-            CPU->PC = target - 3; // the minus three is required because the PC will increment at the end of this instruction
+            CPU->PC = target - 3; // the minus three is required because the CPU->PC will increment at the end of this instruction
             CPU->addressLines = CPU->PC;
         }
         else if (willBranch12)
@@ -1564,7 +1606,7 @@ extern "C"
             {                         // If the sign bit is set
                 offset |= 0xFFFFF000; // Sign extend
             }
-            CPU->PC = CPU->PC + offset - 3; // the minus three is required because the PC will increment at the end of this instruction
+            CPU->PC = CPU->PC + offset - 3; // the minus three is required because the CPU->PC will increment at the end of this instruction
             CPU->addressLines = CPU->PC;
         }
     }
@@ -1587,7 +1629,7 @@ extern "C"
             // AR[t] = imm12 11 20 || imm12
             //
             printf("\n\tThe instruction is MOVI\n");
-            uint32_t imm12 = (s << 8) | (opcode >> (CPU->msbFirstOption ? 0 : 16)) & 0xFF;
+            uint32_t imm12 = ((s << 8) | (opcode >> (CPU->msbFirstOption ? 0 : 16))) & 0xFF;
             CPU->registerFile[CPU->windowOffset + t] = ((int32_t)imm12 << 20) >> 20;
         }
         else if (op0 == 0x0)
@@ -1612,7 +1654,7 @@ extern "C"
                 // ar unchanged
                 // if AR[t] 31 = 0 then AR[r] = AR[s]
                 printf("\n\tThe instruction is MOVGEZ\n");
-                if (CPU->registerFile[CPU->windowOffset + t] & 0x80000000 == 0)
+                if ((CPU->registerFile[CPU->windowOffset + t] & 0x80000000) == 0)
                 {
                     CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s];
                 }
@@ -1623,7 +1665,7 @@ extern "C"
                 // ar to the contents of as MOVLTZ performs no operation and leaves address register ar unchanged
                 // if AR[t] 31 != 0 then AR[r] = AR[s]
                 printf("\n\tThe instruction is MOVLTZ\n");
-                if (CPU->registerFile[CPU->windowOffset + t] & 0x80000000 != 0)
+                if ((CPU->registerFile[CPU->windowOffset + t] & 0x80000000) != 0)
                 {
                     CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s];
                 }
@@ -1692,6 +1734,7 @@ extern "C"
             switch (op2)
             {
             case 0x8:
+            {
                 // ADD       add two registers                                                           RRR
                 // calculates the two's complement 32-bit sum of as and at the low 32 bits are written to ar
                 // arithmetic overflow is not detected
@@ -1701,8 +1744,10 @@ extern "C"
                 int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
                 CPU->registerFile[CPU->windowOffset + r] = as + at;
-                break;
+            }
+            break;
             case 0x9:
+            {
                 // ADDX2     add two registers with one shifted left by one                              RRR
                 // calculates the two's complement 32-bit sum of as shifted left by one bit and at the low 32bits of the sum are written to ar
                 // arithmetic overflow is not detected
@@ -1713,8 +1758,10 @@ extern "C"
                 as = as << 1;
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
                 CPU->registerFile[CPU->windowOffset + r] = as + at;
-                break;
+            }
+            break;
             case 0xA:
+            {
                 // ADDX4     add two registers with one shifted left by two                              RRR
                 // Calculates the two's complement 32-bit sum of as shifted left by two bits and address register at.
                 // low 32 bits of the sum are written to ar no arithmetic overflow detected. frequently used for address calculation and as part
@@ -1725,8 +1772,10 @@ extern "C"
                 as = as << 2;
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
                 CPU->registerFile[CPU->windowOffset + r] = as + at;
-                break;
+            }
+            break;
             case 0xB:
+            {
                 // ADDX8     add two registers with one shifted left by three                            RRR
                 // calculates teh two's complement 32 bit sum of as shifted left by 3 bits and address register at
                 // low 32 bit of the sum are written to ar no arithmetic overflow detected
@@ -1737,8 +1786,10 @@ extern "C"
                 as = as << 3;
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
                 CPU->registerFile[CPU->windowOffset + r] = as + at;
-                break;
+            }
+            break;
             case 0xC:
+            {
                 // SUB       subtract two registers                                                      RRR
                 // calculates the two's complement 32 bit difference of as and at the low 32 bits of difference are written to address register ar
                 // no arithmetic overflow detected
@@ -1747,8 +1798,10 @@ extern "C"
                 int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
                 CPU->registerFile[CPU->windowOffset + r] = as - at;
-                break;
+            }
+            break;
             case 0xD:
+            {
                 // SUBX2     subtract two registers with the un-negated one shifted left by one          RRR
                 // calculates the two's complement 32-bit difference of as shifted left byy 1 bit and at. low 32 bits written to ar
                 // no arithmetic overflow detected
@@ -1759,8 +1812,10 @@ extern "C"
                 as = as << 1;
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
                 CPU->registerFile[CPU->windowOffset + r] = as - at;
-                break;
+            }
+            break;
             case 0xE:
+            {
                 // SUBX4     subtract two registers with the un-negated one shifted left by two          RRR
                 // calculates the two's complement 32-bit difference of as shifted left by two bits and at. low 32 bits of the difference are written to ar
                 // no arithmetic overflow detected. frequently used for sequences to multiply by small constants
@@ -1770,8 +1825,10 @@ extern "C"
                 as = as << 2;
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
                 CPU->registerFile[CPU->windowOffset + r] = as - at;
-                break;
+            }
+            break;
             case 0xF:
+            {
                 // SUBX8     subtract two registers with the un-negated one shifted left by three        RRR
                 // calculates the two's complement 32-bit difference of as shifted left by 3 bits and at
                 // low 32 bits are written to ar no arithmetic overflow detected
@@ -1781,8 +1838,10 @@ extern "C"
                 as = as << 3;
                 int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
                 CPU->registerFile[CPU->windowOffset + r] = as - at;
-                break;
+            }
+            break;
             case 0x6:
+            {
                 if (s == 0x0)
                 {
                     // NEG       negate a register                                                           RRR
@@ -1805,7 +1864,8 @@ extern "C"
                 {
                     printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
                 }
-                break;
+            }
+            break;
             default:
                 printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
                 break;
@@ -1817,21 +1877,37 @@ extern "C"
         }
     }
 
-    static inline void xten_coreBitwiseLogicalInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
+    static inline void xten_coreBitwiseLogicalInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO write tests
     {
-        // core bitwise logical instructions are
-        // AND       bitwise AND of two registers    RRR
-        // calculates bitwise logical and of as and at writing result to ar
-        // AR[r] = AR[s] and AR[t]
-        //
-        // OR        bitwise OR two registers        RRR
-        // calculates  the bitwise logical or of as and at writing result to ar
-        // AR[r] = AR[s] or AR[t]
-        //
-        // XOR       bitwise XOR two registers       RRR
-        // calculates the bitwise logical exclusive or of as and at writing result to ar
-        // AR[r] = AR[s] xor AR[t]
-        //
+        uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
+        uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+        uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
+        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 0 : 20)) & 0x0F;
+
+        switch (op2)
+        {
+        case 0x1:
+            // AND       bitwise AND of two registers    RRR
+            // calculates bitwise logical and of as and at writing result to ar
+            // AR[r] = AR[s] and AR[t]
+            CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s] & CPU->registerFile[CPU->windowOffset + t];
+            break;
+        case 0x2:
+            // OR        bitwise OR two registers        RRR
+            // calculates  the bitwise logical or of as and at writing result to ar
+            // AR[r] = AR[s] or AR[t]
+            CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s] | CPU->registerFile[CPU->windowOffset + t];
+            break;
+        case 0x3:
+            // XOR       bitwise XOR two registers       RRR
+            // calculates the bitwise logical exclusive or of as and at writing result to ar
+            // AR[r] = AR[s] xor AR[t]
+            CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s] ^ CPU->registerFile[CPU->windowOffset + t];
+            break;
+        default:
+            printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+            break;
+        }
     }
 
     static inline void xten_coreShiftInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)

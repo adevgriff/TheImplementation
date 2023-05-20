@@ -294,6 +294,9 @@ extern "C"
 
     /****************************************This section is for decoding**************************************************************/
 
+    // array for easy decoding of the r field special values
+    uint32_t xten_table317[16] = {0xFFFFFFFF, 0x00000001, 0x00000002, 0x00000003, 0x00000004, 0x00000005, 0x00000006, 0x00000007, 0x00000008, 0x0000000A, 0x0000000C, 0x00000010, 0x00000020, 0x00000040, 0x00000080, 0x00000100};
+
     /**
      * @brief This decodes the passed in opcode fetched for the passed in CPU
      *
@@ -1082,7 +1085,7 @@ extern "C"
             offset = offset << 2;
             // noticed here that the program counter is set up in my implementation to point to the currently executing instruction this is an incorrect implementation
             // but not a lot of time to fix it if and when it is fixed the offset will need to have 3 added to it to point to the next instruction
-            CPU->PC = address + offset;
+            CPU->PC = address + offset - 3; // PC will increment by 3 at the end of the instruction
             CPU->addressLines = PC;
         }
         else if (op0 == 0x6)
@@ -1099,7 +1102,7 @@ extern "C"
                 offset |= 0xFFFC0000;
             }
             // Plus 4 issue continued look at CALL0 instruction for details
-            CPU->PC = (CPU->PC + (offset << 2)) & 0xFFFFFFFC;
+            CPU->PC = ((CPU->PC + (offset << 2)) & 0xFFFFFFFC) - 3; // PC will increment by 3 at the end of the instruction
             CPU->addressLines = PC;
         }
         else
@@ -1113,7 +1116,7 @@ extern "C"
                 // perfoms an unconditional jump to the address in register as
                 printf("\n\tThe instruction is JX\n");
                 uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0xF;
-                CPU->PC = CPU->registerFile[CPU->windowOffset + s];
+                CPU->PC = CPU->registerFile[CPU->windowOffset + s] - 3; // PC will increment by 3 at the end of the instruction
                 CPU->addressLines = PC;
             }
             else
@@ -1126,7 +1129,7 @@ extern "C"
                     printf("\n\tThe instruction is CALLX0\n");
                     CPU->registerFile[CPU->windowOffset] = PC + 3; // plus three to make sure it advances to next instruction on return
                     uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0xF;
-                    CPU->PC = CPU->registerFile[CPU->windowOffset + s];
+                    CPU->PC = CPU->registerFile[CPU->windowOffset + s] - 3; // PC will increment by 3 at the end of the instruction
                     CPU->addressLines = PC;
                 }
                 else if (m == 0x2)
@@ -1136,175 +1139,410 @@ extern "C"
                     // This returns from routine called by either CALL0 or CALLX0 equivalent to the instruction JX A0
                     // serparate instruction because some implementations may realize performace advantages from it being seperate
                     printf("\n\tThe instruction is RET\n");
-                    CPU->PC = CPU->registerFile[CPU->windowOffset];
+                    CPU->PC = CPU->registerFile[CPU->windowOffset] - 3; // PC will increment by 3 at the end of the instruction
                     CPU->addressLines = PC;
                 }
             }
         }
     }
 
-    static inline void xten_coreConditionalBranchInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
+    static inline void xten_coreConditionalBranchInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO create code to test a subset at least of these branch instructions
     {
         // RRI8 is [4 bit major opcode][4 bit t AR target or source,BR target or Source, 4bit sub opcode][s 4 bit, AR source, BR source, AR target][r AR target, BR target, 4 bit immediate, 4-bit sub-opcode][imm8 8 bit immediate]
+        // most of these functions as they branch to other parts of the program are going to have plus 4 errors stemming from the lack of correct PC assignment
+        uint32_t op0 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
+        uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
+        uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+        uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
+        uint32_t imm12 = (opcode >> (CPU->msbFirstOption ? 0 : 12)) & 0x0FFF;
+        uint32_t imm8 = (opcode >> (CPU->msbFirstOption ? 0 : 6)) & 0xFF;
 
-        // core conditional branch instructions are
-        // BALL      branch if all bits specified by a mask in one register are set in another register      RRI8
-        // branches if all bits specified by the mask in address register at are set in address register as
-        // test performed by taking bitwise logical and of at and the complement of as and seeing if result is zero
-        // target address is address of the BALL instruction plus the sign-extended 8-bit imm8 plus four if any
-        // masked bits are clear execution continus with next sequential instruction
-        // if((not AR[s]) and AR[t]) = 0^32 then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BANY      branch if any bits specified by a mask in one register are set in another register      RRI8
-        // branches if any of the bits specified by mask in address register at are set in address register as
-        // tested by bitwise logical and of as and at and testing if result is non-zero
-        // target address given by address of BANY plus the sign-extended 8-bit imm8 field of the instruction plus
-        // four if all masked bits are clear execution continues with the next sequential instruction
-        // if(AR[s] and AR[t]) != 0^32 then nextPC = PC+(imm8 7 24||imm8) + 4
-        //
-        // BBC       branch if the bit specified by antoher register is clear                                RRI8
-        // branches if teh bit specified by the low five bits of address register at is clear in addreses register as
-        // for little-endian bit 0 is least significant bit and bi endian bit 0 is most significant bit
-        // target instruction address of the branch is given bay address of BBC instruction plus the sign-extended 8-bit imm8
-        // field plus four if specified bit is set execution continues with the next sequential instruction
-        // b = AR[t]4..0 xor msbFirst^5
-        // if AR[s] b = 0 then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BBS       branch if the bit specified by another register is set                                  RRI8
-        // brances if the bit specified by the low five bits of address register at is set in address reigister as
-        // target address is the address of the BBS instruction plus the sign-extended 8-bit imm8 field of the instruction
-        // plus four. if the specified bit is clear, execution continues with the next sequential instruction
-        // b = AR[t] 4..0 xor msbFirst^5
-        // if AR[s]b != 0 then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BBCI      branch if the bit specified by an immediate is clear                                    RRI8
-        // branches if specified by constant encoded in bbi field is clear in address register as
-        // bbi field is split with bits 3..0 in bits 7..4 of the instruction word, and bit 4 in bit 12 of the instruction
-        // word. target address given by address of the BBCI instruction plus sign-extended 8-bit imm8 field of the instruction
-        // plus 4. If the specified bit is set, execution continues with the next sequential instruction.
-        // b = bbi xor msbFirst^5
-        // if AR[s] b = 0 then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BBSI      branch if the bit specified by an immediate is set                                      RRI8
-        // branches if the bit specified by the constant encoded in bbi field is set in address register as
-        // bbi field is split with bits 3..0 in bits 7..4 of the instruction word and bit 4 in bit 12 of the instruction word
-        // the target instruction address of the branch is iven by teh address of the BBsinstruction plus the sign
-        // extended 8-bit imm8 field of the instruction plus four. if the specified bit is clear execution continues with the
-        // next sequential instruction.
-        // b = bbi xor msbFirst^5
-        // if AR[s]b != 0 then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BEQ       branch if a register equals another register                                            RRI8
-        // branches if address registers as and at are equal
-        // target instruction is address of the BEQ instruction plus the sign-extended 8-bit imm8 field of the instruction
-        // plus 4. if registers are not equal execution continues with the next sequential instruction
-        // if AR[s] = AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BEQI      branch if a register equals an encoded constant                                         RRI8
-        //  branches if as and constant encoded in the r field are equal
-        // constant values encoded in the r field are not simply 0..15. constant values encoded by r, see table 3-17 on page 41
-        // target instruction of the branch is given by address of BEQI instruction plus the sing-extended 8-bit imm8 field plus 4.
-        // if register is not equal to the constant execution continues with the next sequential instruction.
-        // if AR[s] = B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BEQZ      branch if a register equals zero                                                        BRI12
-        // branches if as is equal to zero provides 12 bits of target range instead of the 8 in most conditional
-        // branches target instruction address of the branch is given by the address of the BEQZ instruction plus
-        // the sign-exteneded 12 bit imm12 field of the instruction plus 4.
-        // if register as is not zero execution conintues with the next sequential instruction
-        // if AR[s] = 0^32 then nextPC = PC + (imm12 11 20||imm12) + 4
-        //
-        // BGE       branch if a register is greater than or equal to a register                             RRI8
-        // branches if address as is two's complement greater then or equal ot address at register at
-        // target is BGE instruction address pluse sign-extended imm8 plus four.
-        // if as is less than at execution continues with next sequential instruction
-        // if AR[s] >= AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BGEI      branch if a register is greater than or equal to an encoded constant                    RRI8
-        // branches if as is twos complement greater than or equal to the constant encoded in the r field (table3-17) on page 41
-        // target is address of BGEI instruction plus the sign-extended imm8 plus four if address register as is less
-        // than the constant execution continues with the next sequential instruction
-        // if AR[s] >= B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BGEU      branch if one register is greater than or equal to a register as unsigned               RRI8
-        //  branches if as is unsigned greater then or equal to address register at
-        // target address is BGEU address plus sign-extended imm8 plus 4 if as is less than at execution continues with next
-        // sequential instruction.
-        // if (0||AR[s]) >= (0||AR[t]) then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BGEUI     branch if one register is greater than or equal to an encoded constatnt as unsigned     RRI8
-        // branches if address register as is unsigned greater than or equal to the constant encoded in r(see table 3-18 on pg 42)
-        // target address is address of BGEUI plus sign-extended imm8 plus 4 if as less then constant execution continues
-        // with next sequential instruction
-        // if(-||AR[s]) >= (0||B4CONSTU(r)) then nextPC - PC + (imm8 7 24||imm8) + 4
-        //
-        // BGEZ      branch if a register is greater than or equal to zero                                   BRI12
-        // branches if as is greather than or equal to zero (most significant bit is clear). 12 bit target range instead of 8 in most branches
-        // target address is BGEZ address plus sign-extended imm12 plus 4 if register as is less than zero execution continues
-        // with next sequential instruction
-        // if AR[s]31 = 0 then nextPC = PC + (imm12 11 20||imm12) + 4
-        //
-        // BLT       branch if one register is less than a register                                          RRI8
-        // branches if address register as is two's complement less than address register at
-        // target is address of BLT plus sign-extended imm8 plus 4 if as greater than or equal to at execution continues
-        // with next sequential instruction
-        // if AR[s] < AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BLTI      branch if one register is less than an encoded constant                                 RRI8
-        // branches if as is two's complement less than the constant encoded in r(see table 3-17 on page 41)
-        // target address is BLTI address plus sign-extended imm8 plus 4
-        // if as is greater than or equal to the constant execution continues with the next sequential instruction
-        // if AR[s] < B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BLTU      branch if one register is less than a register as unsigned                              RRI8
-        // branches if as is unsigned less thna at
-        // target is BLTU addres plus sign-extended imm8 plus four if as is greater than or equal to at execution continues
-        // with the next sequential instruction
-        // if (0||AR[s]) < (0||AR[t]) then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BLTUI     branch if one register is less than an encoded constant as unsigned                     RRI8
-        // branches if as is unsigned less than the constant encoded in r field(see 3-18 on page 42)
-        // target is BLTUI address pluse sign-extended imm8 plus 4 if as is greater than or equal to the constant
-        // execution continues with the next sequential instruction
-        // if(0||AR[s]) < (0||B4CONSTU(r)) then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BLTZ      branch if a register is less than zero                                                  BRI12
-        // branches if as is less than zero(most significant bit is set) 12 bit target range
-        // target is BLTZ address plus sign-extended imm12 plus 4 if as is greater than or equal to zero execution
-        // continues with the next sequential instruction.
-        // if AR[s]31 != 0 then nextPC = PC + (imm12 11 20||imm12) + 4
-        //
-        // BNALL     branch if some bits specified by a mask in a register are clear in another register     RRI8
-        // branches if any of the bits specified by the mask in at are clear in as(if they are not all set). test
-        // is performed by taking the bitwise logical and of at with the complement of as and testing if result is non-zero
-        // target is BNALL address plus sign-extended 8-bit imm8 plus 4 if all masked bits are set execution continues
-        // with the next sequential instruction
-        // if((not AR[s]) and AR[t]) != 0 ^32 then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BNONE     branch if all bits spcified by a mask in a register are clear in another register       RRI8
-        // branches if all of the bits specified by the mask in at are clear in as(if non of them are set) test is performed
-        // by taking bitwise logical and of as with at and testing if result is zero
-        // target is BNONE address plus the sign-extended imm8 plus 4 if any of the masked bits are set execution continues
-        // with the next sequential instruction
-        // if (AR[s] and AR[t]) = 0^32 then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BNE       branch if a register does not equal a register                                          RRI8
-        // branches if as and at are not equal
-        // target address is BNE address plus sign-extended imm8 plus 4 if the registers are equal execution continues with the next
-        // sequential instruction
-        // if AR[s] != AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BNEI      branch if a register does not equal an encoded constant                                 RRI8
-        // branches if as and constant encoded in r field(see table 3-17 on page 41) are not equal. target address is
-        // BNEI address plus sign-extended imm8 plus 4. if register is equal to the constant, execution continues with the next sequential instruciton
-        // if AR[s] != B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
-        //
-        // BNEZ      branch if a register does not equal zero                                            BRI12
-        // branches if as is not equal to zero 12 bit target range
-        // target is BNEZ instruction plus sign-extended imm12 plus 4 if register as equals zero execution continues
-        // with the next sequential instruction
-        // if AR[s] != 0 ^32 then nextPC = PC + (imm12 11 20||imm12) + 4
-        //
+        int8_t offset = 0;
+        uint32_t target = 0;
+
+        bool willBranch8 = false;
+        bool willBranch12 = false;
+
+        if (op0 == 0x7)
+        {
+            switch (r)
+            {
+            case 0x0:
+                // BNONE     branch if all bits spcified by a mask in a register are clear in another register       RRI8
+                // branches if all of the bits specified by the mask in at are clear in as(if non of them are set) test is performed
+                // by taking bitwise logical and of as with at and testing if result is zero
+                // target is BNONE address plus the sign-extended imm8 plus 4 if any of the masked bits are set execution continues
+                // with the next sequential instruction
+                // if (AR[s] and AR[t]) = 0^32 then nextPC = PC + (imm8 7 24||imm8) + 4
+                if (CPU->registerFile[CPU->windowOffset + s] & CPU->registerFile[CPU->windowOffset + t] == 0x0)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x1:
+                // BEQ       branch if a register equals another register                                            RRI8
+                // branches if address registers as and at are equal
+                // target instruction is address of the BEQ instruction plus the sign-extended 8-bit imm8 field of the instruction
+                // plus 4. if registers are not equal execution continues with the next sequential instruction
+                // if AR[s] = AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
+                if (CPU->registerFile[CPU->windowOffset + s] == CPU->registerFile[CPU->windowOffset + t])
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x2:
+                // BLT       branch if one register is less than a register                                          RRI8
+                // branches if address register as is two's complement less than address register at
+                // target is address of BLT plus sign-extended imm8 plus 4 if as greater than or equal to at execution continues
+                // with next sequential instruction
+                // if AR[s] < AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+
+                if (as < at)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x3:
+                // BLTU      branch if one register is less than a register as unsigned                              RRI8
+                // branches if as is unsigned less thna at
+                // target is BLTU addres plus sign-extended imm8 plus four if as is greater than or equal to at execution continues
+                // with the next sequential instruction
+                // if (0||AR[s]) < (0||AR[t]) then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+
+                if (as < at)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x4:
+                // BALL      branch if all bits specified by a mask in one register are set in another register      RRI8
+                // branches if all bits specified by the mask in address register at are set in address register as
+                // test performed by taking bitwise logical and of at and the complement of as and seeing if result is zero
+                // target address is address of the BALL instruction plus the sign-extended 8-bit imm8 plus four if any
+                // masked bits are clear execution continus with next sequential instruction
+                // if((not AR[s]) and AR[t]) = 0^32 then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+
+                if (at & ~as == 0)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x5:
+                // BBC       branch if the bit specified by antoher register is clear                                RRI8
+                // branches if teh bit specified by the low five bits of address register at is clear in addreses register as
+                // for little-endian bit 0 is least significant bit and bi endian bit 0 is most significant bit
+                // target instruction address of the branch is given bay address of BBC instruction plus the sign-extended 8-bit imm8
+                // field plus four if specified bit is set execution continues with the next sequential instruction
+                // b = AR[t]4..0 xor msbFirst^5
+                // if AR[s] b = 0 then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+                uint32_t bit = at & 0x1F;
+
+                if (CPU->msbFirstOption)
+                {
+                    // For big endian, bit 0 is the most significant bit.
+                    bit = 31 - bit;
+                }
+                if ((as & (1 << bit)) == 0)
+                {
+                    willBranch8 = true;
+                }
+
+                break;
+            case 0x6:
+                // break omitted because implementation same as the instruction below
+            case 0x7:
+                // BBCI      branch if the bit specified by an immediate is clear                                    RRI8
+                // branches if specified by constant encoded in bbi field is clear in address register as
+                // bbi field is split with bits 3..0 in bits 7..4 of the instruction word, and bit 4 in bit 12 of the instruction
+                // word. target address given by address of the BBCI instruction plus sign-extended 8-bit imm8 field of the instruction
+                // plus 4. If the specified bit is set, execution continues with the next sequential instruction.
+                // b = bbi xor msbFirst^5
+                // if AR[s] b = 0 then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t bbi4_0 = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F; // bbi bits 3..0
+                uint32_t bbi5 = (opcode >> (CPU->msbFirstOption ? 12 : 12)) & 0x01;  // bbi bit 4
+                uint32_t bbi = (bbi5 << 4) | bbi4_0;                                 // Combine to get the full bbi value
+                if (CPU->msbFirstOption)
+                {
+                    // For big endian, bit 0 is the most significant bit.
+                    bbi = 31 - bbi;
+                }
+                if ((as & (1 << bbi)) == 0)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x8:
+                // BANY      branch if any bits specified by a mask in one register are set in another register      RRI8
+                // branches if any of the bits specified by mask in address register at are set in address register as
+                // tested by bitwise logical and of as and at and testing if result is non-zero
+                // target address given by address of BANY plus the sign-extended 8-bit imm8 field of the instruction plus
+                // four if all masked bits are clear execution continues with the next sequential instruction
+                // if(AR[s] and AR[t]) != 0^32 then nextPC = PC+(imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+                if (as & at != 0)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x9:
+                // BNE       branch if a register does not equal a register                                          RRI8
+                // branches if as and at are not equal
+                // target address is BNE address plus sign-extended imm8 plus 4 if the registers are equal execution continues with the next
+                // sequential instruction
+                // if AR[s] != AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+                if (as != at)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0xA:
+                // BGE       branch if a register is greater than or equal to a register                             RRI8
+                // branches if address as is two's complement greater then or equal ot address at register at
+                // target is BGE instruction address pluse sign-extended imm8 plus four.
+                // if as is less than at execution continues with next sequential instruction
+                // if AR[s] >= AR[t] then nextPC = PC + (imm8 7 24||imm8) + 4
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                if (as >= at)
+                {
+                    willBranch8 = true;
+                }
+
+                break;
+            case 0xB:
+                // BGEU      branch if one register is greater than or equal to a register as unsigned               RRI8
+                //  branches if as is unsigned greater then or equal to address register at
+                // target address is BGEU address plus sign-extended imm8 plus 4 if as is less than at execution continues with next
+                // sequential instruction.
+                // if (0||AR[s]) >= (0||AR[t]) then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+                if (as >= at)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0xC:
+                // BNALL     branch if some bits specified by a mask in a register are clear in another register     RRI8
+                // branches if any of the bits specified by the mask in at are clear in as(if they are not all set). test
+                // is performed by taking the bitwise logical and of at with the complement of as and testing if result is non-zero
+                // target is BNALL address plus sign-extended 8-bit imm8 plus 4 if all masked bits are set execution continues
+                // with the next sequential instruction
+                // if((not AR[s]) and AR[t]) != 0 ^32 then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+                if ((at & ~as) != 0)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0xD:
+                // BBS       branch if the bit specified by another register is set                                  RRI8
+                // brances if the bit specified by the low five bits of address register at is set in address reigister as
+                // target address is the address of the BBS instruction plus the sign-extended 8-bit imm8 field of the instruction
+                // plus four. if the specified bit is clear, execution continues with the next sequential instruction
+                // b = AR[t] 4..0 xor msbFirst^5
+                // if AR[s]b != 0 then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+                uint32_t bit = at & 0x1F;
+                if (as & (1 << bit)) // If the bit at 'bitIndex' in 'as' is set
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0xE:
+                // break omitted because implementation same as the instruction below
+            case 0xF:
+                // BBSI      branch if the bit specified by an immediate is set                                      RRI8
+                // branches if the bit specified by the constant encoded in bbi field is set in address register as
+                // bbi field is split with bits 3..0 in bits 7..4 of the instruction word and bit 4 in bit 12 of the instruction word
+                // the target instruction address of the branch is iven by teh address of the BBsinstruction plus the sign
+                // extended 8-bit imm8 field of the instruction plus four. if the specified bit is clear execution continues with the
+                // next sequential instruction.
+                // b = bbi xor msbFirst^5
+                // if AR[s]b != 0 then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                uint32_t bbi4_0 = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F; // bbi bits 3..0
+                uint32_t bbi5 = (opcode >> (CPU->msbFirstOption ? 12 : 12)) & 0x01;  // bbi bit 4
+                uint32_t bbi = (bbi5 << 4) | bbi4_0;
+                if (CPU->msbFirstOption)
+                {
+                    // For big endian, bit 0 is the most significant bit.
+                    bbi = 31 - bbi;
+                }
+                if ((as & (1 << bbi)) != 0)
+                {
+                    willBranch8 = true;
+                }
+                break;
+            }
+        }
+        else if (op0 == 0x6)
+        {
+            switch (t)
+            {
+            case 0x1:
+                // BEQZ      branch if a register equals zero                                                        BRI12
+                // branches if as is equal to zero provides 12 bits of target range instead of the 8 in most conditional
+                // branches target instruction address of the branch is given by the address of the BEQZ instruction plus
+                // the sign-exteneded 12 bit imm12 field of the instruction plus 4.
+                // if register as is not zero execution conintues with the next sequential instruction
+                // if AR[s] = 0^32 then nextPC = PC + (imm12 11 20||imm12) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if (as == 0)
+                {
+                    willBranch12 = true;
+                }
+                break;
+            case 0x2:
+                // BEQI      branch if a register equals an encoded constant                                         RRI8
+                //  branches if as and constant encoded in the r field are equal
+                // constant values encoded in the r field are not simply 0..15. constant values encoded by r, see table 3-17 on page 41
+                // target instruction of the branch is given by address of BEQI instruction plus the sing-extended 8-bit imm8 field plus 4.
+                // if register is not equal to the constant execution continues with the next sequential instruction.
+                // if AR[s] = B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if (as == xten_table317[r])
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x5:
+                // BNEZ      branch if a register does not equal zero                                            BRI12
+                // branches if as is not equal to zero 12 bit target range
+                // target is BNEZ instruction plus sign-extended imm12 plus 4 if register as equals zero execution continues
+                // with the next sequential instruction
+                // if AR[s] != 0 ^32 then nextPC = PC + (imm12 11 20||imm12) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if (as != 0)
+                {
+                    willBranch12 = true;
+                }
+                break;
+            case 0x6:
+                // BNEI      branch if a register does not equal an encoded constant                                 RRI8
+                // branches if as and constant encoded in r field(see table 3-17 on page 41) are not equal. target address is
+                // BNEI address plus sign-extended imm8 plus 4. if register is equal to the constant, execution continues with the next sequential instruciton
+                // if AR[s] != B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if (as != xten_table317[r])
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0x9:
+                // BLTZ      branch if a register is less than zero                                                  BRI12
+                // branches if as is less than zero(most significant bit is set) 12 bit target range
+                // target is BLTZ address plus sign-extended imm12 plus 4 if as is greater than or equal to zero execution
+                // continues with the next sequential instruction.
+                // if AR[s]31 != 0 then nextPC = PC + (imm12 11 20||imm12) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if ((as & 0x80000000) != 0)
+                {
+                    willBranch12 = true;
+                }
+                break;
+            case 0xA:
+                // BLTI      branch if one register is less than an encoded constant                                 RRI8
+                // branches if as is two's complement less than the constant encoded in r(see table 3-17 on page 41)
+                // target address is BLTI address plus sign-extended imm8 plus 4
+                // if as is greater than or equal to the constant execution continues with the next sequential instruction
+                // if AR[s] < B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if ((int32_t)as < (int32_t)xten_table317[r])
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0xB:
+                // BLTUI     branch if one register is less than an encoded constant as unsigned                     RRI8
+                // branches if as is unsigned less than the constant encoded in r field(see 3-18 on page 42)
+                // target is BLTUI address pluse sign-extended imm8 plus 4 if as is greater than or equal to the constant
+                // execution continues with the next sequential instruction
+                // if(0||AR[s]) < (0||B4CONSTU(r)) then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if (as < xten_table317[r])
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0xD:
+                // BGEZ      branch if a register is greater than or equal to zero                                   BRI12
+                // branches if as is greather than or equal to zero (most significant bit is clear). 12 bit target range instead of 8 in most branches
+                // target address is BGEZ address plus sign-extended imm12 plus 4 if register as is less than zero execution continues
+                // with next sequential instruction
+                // if AR[s]31 = 0 then nextPC = PC + (imm12 11 20||imm12) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if (as >= 0)
+                {
+                    willBranch12 = true;
+                }
+            case 0xE:
+                // BGEI      branch if a register is greater than or equal to an encoded constant                    RRI8
+                // branches if as is twos complement greater than or equal to the constant encoded in the r field (table3-17) on page 41
+                // target is address of BGEI instruction plus the sign-extended imm8 plus four if address register as is less
+                // than the constant execution continues with the next sequential instruction
+                // if AR[s] >= B4CONST(r) then nextPC = PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if ((int32_t)as >= (int32_t)xten_table317[r])
+                {
+                    willBranch8 = true;
+                }
+                break;
+            case 0xF:
+                // BGEUI     branch if one register is greater than or equal to an encoded constatnt as unsigned     RRI8
+                // branches if address register as is unsigned greater than or equal to the constant encoded in r(see table 3-18 on pg 42)
+                // target address is address of BGEUI plus sign-extended imm8 plus 4 if as less then constant execution continues
+                // with next sequential instruction
+                // if(-||AR[s]) >= (0||B4CONSTU(r)) then nextPC - PC + (imm8 7 24||imm8) + 4
+                uint32_t as = CPU->registerFile[CPU->windowOffset + s];
+                if (as >= xten_table317[r])
+                {
+                    willBranch8 = true;
+                }
+                break;
+            default:
+                printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+                break;
+            }
+        }
+        else
+        {
+            printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+        }
+
+        if (willBranch8)
+        {
+            // branch to target
+            offset = (int8_t)imm8;
+            target = CPU->PC + ((int32_t)offset << 2);
+            CPU->PC = target - 3; // the minus three is required because the PC will increment at the end of this instruction
+            CPU->addressLines = CPU->PC;
+        }
+        else if (willBranch12)
+        {
+            // branch to target
+            int32_t offset = imm12;
+            if (offset & 0x800)
+            {                         // If the sign bit is set
+                offset |= 0xFFFFF000; // Sign extend
+            }
+            CPU->PC = CPU->PC + offset - 3; // the minus three is required because the PC will increment at the end of this instruction
+            CPU->addressLines = CPU->PC;
+        }
     }
 
     static inline void xten_coreMoveInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)

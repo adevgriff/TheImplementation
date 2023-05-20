@@ -1696,7 +1696,7 @@ extern "C"
         }
     }
 
-    static inline void xten_coreArithmeticInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO write tests
+    static inline void xten_coreArithmeticInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // tested ADDI only so far
     {
         uint32_t op0 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
         uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
@@ -1730,6 +1730,10 @@ extern "C"
                 // that is decoded from a sign-extending imm8 and shifting the result left by eight bits
                 // AR[t] = AR[s] + (imm8 7 16||imm8||0^8)
                 printf("\n\tThe instruction is ADDMI\n");
+                int32_t as = (int32_t)CPU->registerFile[CPU->windowOffset + s];
+                int8_t imm8 = (opcode >> (int8_t)((CPU->msbFirstOption ? 0 : 20)) & 0x0F);
+                int32_t shiftedImm8 = (int32_t)imm8 << 8;
+                CPU->registerFile[CPU->windowOffset + t] = as + shiftedImm8;
             }
             else
             {
@@ -1920,7 +1924,7 @@ extern "C"
         }
     }
 
-    static inline void xten_coreShiftInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO test and figure out how to single out EXTUI instruction
+    static inline void xten_coreShiftInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO test
     {
 
         uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
@@ -2075,7 +2079,7 @@ extern "C"
                 }
                 break;
             default:
-                if (((opcode >> 5) & 0x7) == 0x2) // TODO fix this instruction trouble figuring out the SA register
+                if (((opcode >> 5) & 0x7) == 0x2)
                 {
                     // EXTUI     extract field specified by immediates from a register                               RRR
                     // performs unsigned bit field extraction from a 32 bit register value shifts the contents of address register at right by sa

@@ -2084,7 +2084,11 @@ extern "C"
                     // AR[r] = (0^32||AR[t]) 31+sa..sa and mask
                     printf("\n\tThe instruction is EXTUI\n");
                     {
-                        uint32_t sa = (op2 % 2) << 4 | s;
+                        uint32_t sa = (op1 % 2) << 4 | s;
+                        uint32_t at = CPU->registerFile[CPU->windowOffset + t] >> sa;
+                        uint32_t maskimm = op2 + 1;
+                        uint32_t mask = ((1U << maskimm) - 1);
+                        CPU->registerFile[CPU->windowOffset + r] = at & mask;
                     }
                 }
                 if (((opcode >> 1) & 0xF) == 0x9)
@@ -2094,6 +2098,7 @@ extern "C"
                     // and bit 4 in bit 4 of the instruction word. primarily useful to set the shift amount for SRC.
                     // SAR = 0||sa
                     printf("\n\tThe instruction is SSAI\n");
+                    CPU->sar = (opcode & 0x1F) | s;
                 }
                 else if (((opcode >> 1) & 0xF) == 0x8)
                 {
@@ -2104,6 +2109,9 @@ extern "C"
                     // asselmbler encodes this instruction as or when the sa is zero
                     // AR[r] = (AR[s]||0^32) 31+sa..sa
                     printf("\n\tThe instruction is SLLI\n");
+                    uint32_t sa = (opcode >> 4) & 0xF;
+                    sa = sa + ((opcode >> 16) & 0x10);
+                    CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s] << sa;
                 }
                 printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
                 break;
@@ -2113,10 +2121,9 @@ extern "C"
 
     static inline void xten_coreProcessorControlInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
-        uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
         uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
-        uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
         uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 0 : 20)) & 0x0F;
+        uint32_t sr = (opcode >> (CPU->msbFirstOption ? 8 : 8)) & 0xFF;
 
         switch (op2)
         {
@@ -2132,6 +2139,10 @@ extern "C"
             // if sr >= 64 and CRING != 0 then exception (privilegedInstructionCause) if expetion option
             // else tables in section 5.3 on page 208
             printf("\n\tThe instruction is RSR\n");
+            if (sr == 0x03)
+            { // this is the only special register in the core archetecture accessible this way
+                CPU->registerFile[CPU->windowOffset + t] = CPU->sar;
+            }
             break;
         case 0x1:
             // WSR       write a special register                                RSR
@@ -2144,10 +2155,13 @@ extern "C"
             // if sr >= 64 and CRING != 0 then exception(privilegedInstructionCause)
             // else see 208
             printf("\n\tThe instruction is WSR\n");
+            if (sr == 0x03)
+            { // this is the only special register in the core archetecture accessible this way
+                CPU->sar = CPU->registerFile[CPU->windowOffset + t] & 0x1F;
+            }
             break;
         case 0x6:
             // XSR       read and write a special register in an exchange        RRR
-            // These are starting to get complicated better to have all the information on them
             /*XSR.* simultaneously reads and writes the special registers that are described in
             Section 3.8.10 “Processor Control Instructions” on page 45. See Section 5.3 on
             page 208 for more detailed information on the operation of this instruction for each
@@ -2172,7 +2186,14 @@ extern "C"
             //   t0 = AR[t]
             //   t1 = see RSR frame of tables on 208
             printf("\n\tThe instruction is XSR\n");
+            if (sr == 0x03)
+            { // this is the only special register in the core archetecture accessible this way
+                uint32_t at = CPU->registerFile[CPU->windowOffset + t];
+                CPU->registerFile[CPU->windowOffset + t] = CPU->sar;
+                CPU->sar = at & 0x1F;
+            }
             break;
+            // USER defined registers have not been implemented at this point in time
         case 0xE:
             //  RUR       read user special register                              ?
             //  reads TIE state that has been grouped into 32-bit quantities by the TIE user_register statement.
@@ -2192,6 +2213,7 @@ extern "C"
         default:
             switch (opcode)
             {
+                // these last 4 function as nops for now
             case 0x000200:
                 //  ISYNC     wait for instruction-Fetch-related changes to reslove   RRR
                 /*ISYNC waits for all previously fetched load, store, cache, TLB, WSR.*, and XSR.*

@@ -14,7 +14,12 @@ uint32_t readMemory(Xtensa_lx_CPU *CPU, uint32_t address, void *context)
    }
    else
    {
-      value = rom[address];
+      value = 0x00;
+      for (int i = 0; i < 4; i++)
+      {
+         value = value << 8;
+         value = value | rom[address + i];
+      }
    }
    return value;
 }
@@ -25,41 +30,34 @@ void writeMemory(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, void *con
 }
 void processInstruction(Xtensa_lx_CPU *CPU, uint8_t rom[ROM_SIZE])
 {
-   // First looks at write bit to determine if the CPU is intending to write
-   if (CPU->write == XTEN_HIGH)
+   // process read and prompt CPU to execute next instruction
+   // need to put together 32 bit instruction first and put things back on to the data line
+   CPU->dataBus = 0; // clear the dataBus
+   for (int i = 0; i < 4; i++)
    {
-      // process write
+      CPU->dataBus = CPU->dataBus << 8;
+      CPU->dataBus = CPU->dataBus | rom[CPU->addressLines + i];
    }
-   else
-   {
-      // process read and prompt CPU to execute next instruction
-      // need to put together 32 bit instruction first and put things back on to the data line
-      CPU->dataBus = 0; // clear the dataBus
-      for (int i = 0; i < 4; i++)
-      {
-         CPU->dataBus = CPU->dataBus << 8;
-         CPU->dataBus = CPU->dataBus | rom[CPU->addressLines + i];
-      }
-      // now that the databus is set the cpu is ready to execute the instruction
-      xten_executeNext(CPU);
-      xten_displayCPU(CPU);
-   }
+   // now that the databus is set the cpu is ready to execute the instruction
+   xten_executeNext(CPU);
+   xten_displayCPU(CPU);
 }
 
 int main(int argc, char *argv[])
 {
-   // create a new xtensa CPU
-   Xtensa_lx_CPU *CPU = xten_createCPU(readMemory, writeMemory);
 
    // set any chip development parameters
 
    // create a memory alternative
    uint8_t rom[ROM_SIZE] = {0};
 
+   // create a new xtensa CPU
+   Xtensa_lx_CPU *CPU = xten_createCPU(readMemory, writeMemory, (void *)rom);
+
    // attach any gpio style stuff
 
    // load program into memory at 0x00
-   FILE *romFile = fopen("load_test.m", "rb");
+   FILE *romFile = fopen("core_load_instruction_test.m", "rb");
    if (romFile == NULL)
    {
       printf("Issues with opening the rom file!");

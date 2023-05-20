@@ -1,0 +1,8 @@
+core_load_instruction_test.m should output the following values in the following registers assuming that register 10 is starting at zero which in this implementation it does although this value should generally be garbadge
+these are randomish values placed at the end of the code to check against that are being loaded into registers with the instructions. These tests are kind of limited because they were written in machine code with a hex editor.
+r1: 0xC0 
+r2: 0xFFFFECDE the value here that should be retrieved is ECDE but it should be sign extended so in this case it would be one extended
+r3: 0xFFEF
+r4: 0xECDEFFEF
+r5: 0x21A00F22 this one was done last due to it only addressing backwards from the instruction itself so I set it to write what is at address zero which is the instruction that assigns r1 and part of the instruction that assigns r2
+

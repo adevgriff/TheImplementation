@@ -47,6 +47,7 @@ extern "C"
 
     void xten_helper_printBinary(uint32_t value);
     void xten_helper_printRegisters(uint32_t *reg_file, uint32_t offset);
+    uint32_t xten_helper_signExtend32Bits(uint32_t value, int bits);
 
     /**
      * @brief This is a function pointer type for memory access the user must implement.
@@ -67,17 +68,6 @@ extern "C"
      * @param value The value to write to memory at the given address.
      */
     typedef void (*MemoryWriteCallback)(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, void *context);
-
-    /**
-     * @brief Default memory write callback fucntion
-     * this simply takes the address and value and returns
-     *
-     * @param CPU A pointer to the current CPU context.
-     * @param address The address in memory to read from.
-     */
-    uint32_t xten_defaultMemoryWriteCallback(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, void *context)
-    {
-    }
 
     /**
      * @brief struct representing an Xtensa CPU
@@ -261,7 +251,7 @@ extern "C"
      *
      * @return Xtensa_lx_CPU with default options
      */
-    Xtensa_lx_CPU *xten_createCPU(MemoryReadCallback readMemory, MemoryWriteCallback writeMemory)
+    Xtensa_lx_CPU *xten_createCPU(MemoryReadCallback readMemory, MemoryWriteCallback writeMemory, void *callbackContext)
     {
         Xtensa_lx_CPU *resultingCPU;
         resultingCPU = (Xtensa_lx_CPU *)malloc(sizeof(Xtensa_lx_CPU));
@@ -276,16 +266,29 @@ extern "C"
         resultingCPU->addressLines = resultingCPU->PC; // starting at PC address
         resultingCPU->dataBus = 0;                     // this is simply to initialize it to something
 
-        resultingCPU->readMemory = readMemory;   // user defined function that handles the memory access portion of the pipeline the way the user defines
-        resultingCPU->writeMemory = writeMemory; // user defined function that handles the writeback portion of the pipeline the way the user defines
+        resultingCPU->readMemory = readMemory;           // user defined function that handles the memory access portion of the pipeline the way the user defines
+        resultingCPU->writeMemory = writeMemory;         // user defined function that handles the writeback portion of the pipeline the way the user defines
+        resultingCPU->callbackContext = callbackContext; // callback contexts data that the user would like to use in the callback functions
 
         // TODO ensure that the funcitons for memory read and write are implemented if not the CPU should be NULL for easy handeling of errors for the user
-        if (readMemory == NULL || writeMemory == NULL)
+        if (readMemory == NULL || writeMemory == NULL || callbackContext == NULL)
         {
             resultingCPU = NULL;
         }
 
         return resultingCPU;
+    }
+
+    static inline void xten_freeCPU(Xtensa_lx_CPU *CPU)
+    {
+        if (CPU != NULL)
+        {
+            if (CPU->registerFile != NULL)
+            {
+                free(CPU->registerFile);
+            }
+            free(CPU);
+        }
     }
 
     /****************************************This section is for decoding**************************************************************/
@@ -852,15 +855,16 @@ extern "C"
 
     /*******************************************End of decoding section***********************************************************************/
 
-    static inline void xten_freeCPU(Xtensa_lx_CPU *CPU)
-    {
-        free(CPU->registerFile);
-    }
-
     static inline void xten_coreLoadInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
 
-        size_t address = 0x0;
+        // Two opcodes being used here RRI8 and RI16 here they are in big endian both of these are 24 bit instructions
+        // RRI8 is [4 bit major opcode][4 bit t AR target or source,BR target or Source, 4bit sub opcode][s 4 bit, AR source, BR source, AR target][r AR target, BR target, 4 bit immediate, 4-bit sub-opcode][imm8 8 bit immediate]
+        // RI16 is [4 bit major opcode][t 4 bit][imm16 16 bit immediate]
+
+        uint32_t address = 0x0; // size_t instead of uint32_t because during part of the operation can be negative we do not want it to end up negative though need to take a closer look at this TODO
+        uint32_t value = 0x0;   // should not end up changing at if it is not changed which should not be the case unless an unimplemented instruction is encountered.
+
         // for each instruction they need to calculate the address and the value to be assigned to the register the data each time is written to register t
         // t is in the same place for all so it can be extracted first
         uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F; // this is the index of the register to assign data to regFile[t+windowOffset] = value being loaded
@@ -868,74 +872,86 @@ extern "C"
         uint32_t op0 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
         if (op0 == 0x1)
         {
+            // L32R      load literal at offset from PC(32 bit load pc relative(16 bit negative word offset))   RI16
+            // major opcode 0001     no sub opcode for this one
+            // PC relative 32 bit load
+            // address formed by adding 16 bit one extended constant value shifted left by two
+            // to teh address of teh L32R plus three with the two least significant bits cleared
+            // specifies 32-bit aligned addresses from -262141 to -4 bytes from the address of teh L32R instruction
+            // 32 bits are read from the address and written to at
+            // one of few memory instrucitons that can access instruction RAM/ROM
             printf("\n\tThe instruction is L32R\n");
             // Now we calculate the address for the L32R instruction
-            size_t address = 0xFFFFFFFF;
-            address = ((address & ((opcode >> ((CPU->msbFirstOption ? 0 : 8)) & 0xFFFF) << 2)) + CPU->PC + 3) & 0xFFFFFFFC;
+
+            uint16_t constValue = (opcode >> (CPU->msbFirstOption ? 0 : 8)) & 0xFFFF;
+            int32_t oneExtendedConst = (int16_t)constValue;
+            uint32_t address = (CPU->PC + 3 + (oneExtendedConst << 2)) & 0xFFFFFFFC;
+
+            // we recieve the value for the instruction to load and manipulate as nessecerry
+            value = CPU->readMemory(CPU, address, CPU->callbackContext);
         }
         else
         {
+            // these instructions require s which defines what register is being added to create virtual address
+            uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
+            // instructions also require the 8 bit immidiate that is added to s to form the virtual address
+            uint32_t imm8 = (opcode >> (CPU->msbFirstOption ? 0 : 16)) & 0xFF; // this is the zero extended version
             // the instruction is found by looking at r
             uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
             switch (r)
             {
             case 0x0:
+                // core load instructions are
+                // L8UI      load zero-extended byte(8 bit unsigned load(8 bit offset))                             RRI8
+                // major opcode 0010     4-bit sub opcode in r 0000
+                // adds contents of register represented by s to 8 bit immediate
+                // data at memory address represented by this addition is then stored
+                // in register represented by t zero extended
                 printf("\n\tThe instruction is L8UI\n");
+                address = CPU->registerFile[CPU->windowOffset + s] + imm8;
+                value = CPU->readMemory(CPU, address, CPU->callbackContext) >> 24; // only 8 bits are read zero extended
                 break;
             case 0x9:
+                // L16SI     load signed extended 16 bit quantity(16 bit signed load(8 bit shifted offset))         RRI8
+                // major opcode 0010     4-bit sub opcode stored in r 1001
+                // 8 bit constant added to register represented by s shifted left by 1
+                // 16 bits two bytes read from register at the memory location this makes the value
+                // sign extended and then stored in register represented by t
+                // without unaligned exception option least significant address bit is ignored
+                // essentially subtract one from odd addresses before accessing
                 printf("\n\tThe instruction is L16SI\n");
+                address = CPU->registerFile[CPU->windowOffset + s] + (imm8 << 1);
+                value = CPU->readMemory(CPU, address, CPU->callbackContext) >> 16; // only 16 bits are read sign extended
+                value = xten_helper_signExtend32Bits(value, 16);
                 break;
             case 0x1:
+                // L16UI     load zero extended 16 bit quantity(16 bit unsigned load(8 bit shifted offset))         RRI8
+                // major opcode 0010     4-bit sub opcode stored in r 0001
+                // adds as and 8 bit immediate shifted left by 1
+                // reads in data like in L16SI except the data is zero extended instead of sign extened
                 printf("\n\tThe instruction is L16UI\n");
+                address = CPU->registerFile[CPU->windowOffset + s] + (imm8 << 1);
+                value = CPU->readMemory(CPU, address, CPU->callbackContext) >> 16; // only 16 bits are read sign extended
                 break;
             case 0x2:
+                // L32I      load 32 bit quantity(32 bit load(8 bit shifted offset))                                RRI8
+                // major opcode 0010     4-bit sub opcode stored in r 0010
+                // adds register as and 8 bit zero extended constant shifted left by 2
+                // reads address this represents 4 bytes of it written to register at
+                // this instruction ignores least significant two bits of the address calculated
+                // without unaligned exception option
                 printf("\n\tThe instruction is L32I\n");
+                address = CPU->registerFile[CPU->windowOffset + s] + (imm8 << 2);
+                value = CPU->readMemory(CPU, address, CPU->callbackContext);
                 break;
             default:
-                printf("\n\tThe instruction is not implemented or something went wrong!\n");
+                // if we end up here something is wrong in the machine code being executed
+                printf("\n\tThe instruction is not implemented or something went wrong! This behaviour is undefined.\n");
                 break;
             }
         }
-
-        // Two opcodes being used here RRI8 and RI16 here they are in big endian both of these are 24 bit instructions
-        // RRI8 is [4 bit major opcode][4 bit t AR target or source,BR target or Source, 4bit sub opcode][s 4 bit, AR source, BR source, AR target][r AR target, BR target, 4 bit immediate, 4-bit sub-opcode][imm8 8 bit immediate]
-        // RI16 is [4 bit major opcode][t 4 bit][imm16 16 bit immediate]
-
-        // core load instructions are
-        // L8UI      load zero-extended byte(8 bit unsigned load(8 bit offset))                             RRI8
-        // major opcode 0010     4-bit sub opcode in r 0000
-        // adds contents of register represented by s to 8 bit immediate
-        // data at memory address represented by this addition is then stored
-        // in register represented by t zero extended
-
-        // L16SI     load signed extended 16 bit quantity(16 bit signed load(8 bit shifted offset))         RRI8
-        // major opcode 0010     4-bit sub opcode stored in r 1001
-        // 8 bit constant added to register represented by s shifted left by 1
-        // 16 bits two bytes read from register at the memory location this makes the value
-        // sign extended and then stored in register represented by t
-        // without unaligned exception option least significant address bit is ignored
-        // essentially subtract one from odd addresses before accessing
-
-        // L16UI     load zero extended 16 bit quantity(16 bit unsigned load(8 bit shifted offset))         RRI8
-        // major opcode 0010     4-bit sub opcode stored in r 0001
-        // adds as and 8 bit immediate shifted left by 1
-        // reads in data like in L16SI except the data is zero extended instead of sign extened
-
-        // L32I      load 32 bit quantity(32 bit load(8 bit shifted offset))                                RRI8
-        // major opcode 0010     4-bit sub opcode stored in r 0010
-        // adds register as and 8 bit zero extended constant shifted left by 2
-        // reads address this represents 4 bytes of it written to register at
-        // this instruction ignores least significant two bits of the address calculated
-        // without unaligned exception option
-
-        // L32R      load literal at offset from PC(32 bit load pc relative(16 bit negative word offset))   RI16
-        // major opcode 0001     no sub opcode for this one
-        // PC relative 32 bit load
-        // address formed by adding 16 bit one extended constant value shifted left by two
-        // to teh address of teh L32R plus three with the two least significant bits cleared
-        // specifies 32-bit aligned addresses from -262141 to -4 bytes from the address of teh L32R instruction
-        // 32 bits are read from the address and written to at
-        // one of few memory instrucitons that can access instruction RAM/ROM
+        printf("\naddress is %8X and value to be assigned from that address is %8X\n", address, value);
+        CPU->registerFile[CPU->windowOffset + t] = value;
     }
 
     static inline void xten_coreStoreInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
@@ -1537,6 +1553,23 @@ extern "C"
             // Print register number and value
             printf("Register %2u: 0x%08x\n", i, reg_file[i]);
         }
+    }
+
+    /**
+     * @brief returns the sign extended version of a uint32_t that represents a smaller value
+     *
+     * This function takes takes the smaller in size then uint23_t value and calculates the 32 bit version of that value sign extended this may seem confusing
+     * since only uint32_t is being used this is because different instructions may use different methods to represent signed values and we want to have control over how it works
+     *
+     * @param uint32_t smaller value to sign extend.
+     * @param int number of bits in the smaller in initial value
+     * @return uint32_t the sign extended version of that value.
+     */
+    uint32_t xten_helper_signExtend32Bits(uint32_t value, int bits)
+    {
+        uint32_t mask = 1U << (bits - 1);                        // sets a 1 in the location of the sign bit
+        uint32_t signExtendedValue = value & ((1U << bits) - 1); // makes sure the value is zero extended if it is not already
+        return (signExtendedValue ^ mask) - mask;
     }
 
 #ifdef __cplusplus

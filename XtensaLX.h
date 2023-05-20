@@ -67,7 +67,7 @@ extern "C"
      * @param address The address in memory to write to.
      * @param value The value to write to memory at the given address.
      */
-    typedef void (*MemoryWriteCallback)(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, void *context);
+    typedef void (*MemoryWriteCallback)(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, int numBytes, void *context);
 
     /**
      * @brief struct representing an Xtensa CPU
@@ -957,26 +957,51 @@ extern "C"
     static inline void xten_coreStoreInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
         // RRI8 is [4 bit major opcode][4 bit t AR target or source,BR target or Source, 4bit sub opcode][s 4 bit, AR source, BR source, AR target][r AR target, BR target, 4 bit immediate, 4-bit sub-opcode][imm8 8 bit immediate]
+        // firstly we extract the parts of the opcode
+        uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
+        uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+        uint32_t imm8 = (opcode >> (CPU->msbFirstOption ? 0 : 16)) & 0xFF; // zero extended
+        uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
+        uint32_t value = 0;
 
-        // core store instructions are
-        // s8I       store byte                  RRI8
-        // major opcode 0010     sub opcode at r 0100
-        // adds as and zero exteneded immediate 1 byte is written from
-        // the least significant 8 bits of register at to memory at the address
-        // caclulated
-
-        // s16I      store 16 bit quantity       RRI8
-        // major opcode 0010     sub opcode at r 0101
-        // forms address adding as and 8 bit immediate zero exteneded shifted left by one
-        // 16 least significant bits from at are written to the address formed
-        // least significant bit is ignored in the calculated address without the unaligned exception option
-
-        // s32I      store 32 bit quantity       RRI8
-        // major opcode 0010     sub opcode at r 0110
-        // forms address by adding as with 8 bit zero exteneded constant shifted left by two
-        // writes at to the memory address formed
-        // least significant 2 bits of the address are ignored without unaligned exception option
-        // can access instruction RAM
+        switch (r)
+        {
+        case 0x4:
+            // core store instructions are
+            // s8I       store byte                  RRI8
+            // major opcode 0010     sub opcode at r 0100
+            // adds as and zero exteneded immediate 1 byte is written from
+            // the least significant 8 bits of register at to memory at the address
+            // caclulated
+            printf("\n\tThe instruction is S8I\n");
+            value = CPU->registerFile[CPU->windowOffset + t] & 0xFF;
+            CPU->writeMemory(CPU, imm8 + CPU->registerFile[CPU->windowOffset + s], value, 1, CPU->callbackContext);
+            break;
+        case 0x5:
+            // s16I      store 16 bit quantity       RRI8
+            // major opcode 0010     sub opcode at r 0101
+            // forms address adding as and 8 bit immediate zero exteneded shifted left by one
+            // 16 least significant bits from at are written to the address formed
+            // least significant bit is ignored in the calculated address without the unaligned exception option
+            printf("\n\tThe instruction is S16I\n");
+            value = CPU->registerFile[CPU->windowOffset + t] & 0xFFFF;
+            CPU->writeMemory(CPU, (imm8 << 1) + CPU->registerFile[CPU->windowOffset + s], value, 2, CPU->callbackContext);
+            break;
+        case 0x6:
+            // s32I      store 32 bit quantity       RRI8
+            // major opcode 0010     sub opcode at r 0110
+            // forms address by adding as with 8 bit zero exteneded constant shifted left by two
+            // writes at to the memory address formed
+            // least significant 2 bits of the address are ignored without unaligned exception option
+            // can access instruction RAM
+            printf("\n\tThe instruction is S32I\n");
+            value = CPU->registerFile[CPU->windowOffset + t] & 0xFFFFFFFF;
+            CPU->writeMemory(CPU, (imm8 << 2) + CPU->registerFile[CPU->windowOffset + s], value, 4, CPU->callbackContext);
+            break;
+        default:
+            printf("\nSomething went wrong proceeded to xten_coreStoreInstructions without a valid opcode this error could have come from the code being run\n");
+            break;
+        }
     }
 
     static inline void xten_coreMemoryOrderingInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)

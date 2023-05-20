@@ -6,3 +6,10 @@ r3: 0xFFEF
 r4: 0xECDEFFEF
 r5: 0x21A00F22 this one was done last due to it only addressing backwards from the instruction itself so I set it to write what is at address zero which is the instruction that assigns r1 and part of the instruction that assigns r2
 
+core_store_instruction_test.M
+this uses the 32 bit unsinged load instruction from above and the same location of data to store the value 0xecdeffef into register 4 then tests the three store instructions implemented by
+checking to see that the test code outputs the following write attempts
+attempted write at location 0xFF of value 0xEF
+attempted write at location 0x1FE of value 0xFFEF
+attempted write at location 0x3FC of value 0xECDEFFEF
+

@@ -24,10 +24,11 @@ uint32_t readMemory(Xtensa_lx_CPU *CPU, uint32_t address, void *context)
    return value;
 }
 
-void writeMemory(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, void *context)
+void writeMemory(Xtensa_lx_CPU *CPU, uint32_t address, uint32_t value, int numBytes, void *context)
 {
    printf("\nTest Code:attempt to write to an unimplemented area in memory %8X with the value %8X value will not be written.\n", address, value);
 }
+
 void processInstruction(Xtensa_lx_CPU *CPU, uint8_t rom[ROM_SIZE])
 {
    // process read and prompt CPU to execute next instruction
@@ -57,7 +58,7 @@ int main(int argc, char *argv[])
    // attach any gpio style stuff
 
    // load program into memory at 0x00
-   FILE *romFile = fopen("core_load_instruction_test.m", "rb");
+   FILE *romFile = fopen("core_store_instruction_test.m", "rb");
    if (romFile == NULL)
    {
       printf("Issues with opening the rom file!");
@@ -70,7 +71,7 @@ int main(int argc, char *argv[])
       // test prints
       xten_displayCPU(CPU);
       // execute loop
-      for (int i = 0; i < 5; i++)
+      for (int i = 0; i < 4; i++)
       {
          processInstruction(CPU, rom);
       }

@@ -44,6 +44,7 @@ extern "C"
     static inline void xten_coreLoadInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreStoreInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
     static inline void xten_coreProcessorControlInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
+    static inline void xten_coreMemoryOrderingInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode);
 
     void xten_helper_printBinary(uint32_t value);
     void xten_helper_printRegisters(uint32_t *reg_file, uint32_t offset);
@@ -391,7 +392,7 @@ extern "C"
      */
     static inline void xten_decodeQRST(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
-        uint32_t op1 = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+        uint32_t op1 = (opcode >> (CPU->msbFirstOption ? 4 : 16)) & 0x0F;
 #ifdef XTEN_DEBUGGING
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
@@ -626,7 +627,7 @@ extern "C"
      */
     static inline void xten_decodeRST0(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
-        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
+        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 0 : 20)) & 0x0F;
 #ifdef XTEN_DEBUGGING
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
@@ -640,7 +641,7 @@ extern "C"
             {
                 // ST0 table
                 // if r is 0x0000 then SNM0 table 196 otherwise all reserved or unimplemented then uses M some of these are implemented so it is important TODO
-                if (((opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F) == 0x0)
+                if (((opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F) == 0x0)
                 {
                     uint32_t m = (opcode >> (CPU->msbFirstOption ? 16 : 6)) & 0x03;
                     switch (m)
@@ -658,6 +659,25 @@ extern "C"
                     case 0x3:
                         // CALLX table 198 reserved or unimplemented based on n or goes to following function set
                         xten_coreJumpCallInstructions(CPU, opcode);
+                        break;
+                    }
+                }
+                else if (((opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F) == 0x2) // if R is two seems to go to the SYNC table confirmed missed first pass because it is surrounded by unimplemented opcodes
+                {
+                    // this is a hot fix for the lack of encoutering the SYNC table that bases the instructions it accesses off of the t value discovered missing when implementing EXTW and MEMW
+                    uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+                    switch (t)
+                    {
+                    case 0xC:
+                        xten_coreMemoryOrderingInstructions(CPU, opcode);
+                        break;
+                    case 0xD:
+                        xten_coreMemoryOrderingInstructions(CPU, opcode);
+                        break;
+                    default:
+#ifdef XTEN_DEBUGGING
+                        printf("\tThis is an unimplemented or reserved opcode.\n");
+#endif
                         break;
                     }
                 }
@@ -733,7 +753,7 @@ extern "C"
      */
     static inline void xten_decodeRST1(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
-        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
+        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 0 : 20)) & 0x0F;
 #ifdef XTEN_DEBUGGING
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
@@ -800,7 +820,7 @@ extern "C"
      */
     static inline void xten_decodeRST3(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
-        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 20 : 0)) & 0x0F;
+        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 0 : 20)) & 0x0F;
 #ifdef XTEN_DEBUGGING
         printf("PC %X opcode %X:\n", CPU->PC, opcode);
 #endif
@@ -1007,17 +1027,27 @@ extern "C"
     static inline void xten_coreMemoryOrderingInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
         // RRR is [op0][t][s][r][op1][op2]
+        uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
 
-        // core memory ordering instructions are
-        // MEMW      wait for any possible memory ordering requirement       RRR
-        // major opcode 0000     subopcodes specified by op1 0000 op2 0000 rst in that order 0010 0000 1100
-        // in this implementation is a no-op used to seperate load and store calls needing more time
-
-        // EXTW      wait for any possible external ordering requiremetn     RRR
-        // no paramiters whole thing is opcode 0000 0000 0010 0000 1101 0000
-        // ensures changes from all previous instructions before will perform
-        // any load, store, acquire, release, prefetch, or cash instructions
-        // and everything that will has affected output pins
+        switch (t)
+        {
+        case 0xC:
+            // core memory ordering instructions are
+            // MEMW      wait for any possible memory ordering requirement       RRR
+            // major opcode 0000     subopcodes specified by op1 0000 op2 0000 rst in that order 0010 0000 1100
+            // in this implementation is a no-op used to seperate load and store calls needing more time
+            printf("\n\tThe instruction is MEMW\n");
+        case 0xD:
+            // EXTW      wait for any possible external ordering requiremetn     RRR
+            // no paramiters whole thing is opcode 0000 0000 0010 0000 1101 0000
+            // ensures changes from all previous instructions before will perform
+            // any load, store, acquire, release, prefetch, or cash instructions
+            // and everything that will has affected output pins
+            printf("\n\tThe instruction is EXTW\n");
+        default:
+            printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+            break;
+        }
     }
 
     static inline void xten_coreJumpCallInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)

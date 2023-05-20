@@ -13,3 +13,7 @@ attempted write at location 0xFF of value 0xEF
 attempted write at location 0x1FE of value 0xFFEF
 attempted write at location 0x3FC of value 0xECDEFFEF
 
+core_memoryOrdering_instructions_test.M
+both of the instructions in this section are essentailly operating as no-ops so all that is being tested is that they are decoded properly
+first instruction should be MEMW
+next should be EXTW

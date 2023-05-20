@@ -98,6 +98,8 @@ extern "C"
         MemoryReadCallback readMemory;   // this handles memory reads function implemented by the user before CPU creation
         MemoryWriteCallback writeMemory; // this handles memory writes function implemented by the user before CPU creation
 
+        uint32_t sar; // shift amount register only special register for the core profile
+
         void *callbackContext; // this allows the user to pass in any data they need to the callback implementations
 
     } Xtensa_lx_CPU;
@@ -270,6 +272,8 @@ extern "C"
         resultingCPU->readMemory = readMemory;           // user defined function that handles the memory access portion of the pipeline the way the user defines
         resultingCPU->writeMemory = writeMemory;         // user defined function that handles the writeback portion of the pipeline the way the user defines
         resultingCPU->callbackContext = callbackContext; // callback contexts data that the user would like to use in the callback functions
+
+        resultingCPU->sar = 0;
 
         // TODO ensure that the funcitons for memory read and write are implemented if not the CPU should be NULL for easy handeling of errors for the user
         if (readMemory == NULL || writeMemory == NULL || callbackContext == NULL)
@@ -1890,18 +1894,21 @@ extern "C"
             // AND       bitwise AND of two registers    RRR
             // calculates bitwise logical and of as and at writing result to ar
             // AR[r] = AR[s] and AR[t]
+            printf("\n\tThe instruction is AND\n");
             CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s] & CPU->registerFile[CPU->windowOffset + t];
             break;
         case 0x2:
             // OR        bitwise OR two registers        RRR
             // calculates  the bitwise logical or of as and at writing result to ar
             // AR[r] = AR[s] or AR[t]
+            printf("\n\tThe instruction is OR\n");
             CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s] | CPU->registerFile[CPU->windowOffset + t];
             break;
         case 0x3:
             // XOR       bitwise XOR two registers       RRR
             // calculates the bitwise logical exclusive or of as and at writing result to ar
             // AR[r] = AR[s] xor AR[t]
+            printf("\n\tThe instruction is XOR\n");
             CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s] ^ CPU->registerFile[CPU->windowOffset + t];
             break;
         default:
@@ -1910,200 +1917,331 @@ extern "C"
         }
     }
 
-    static inline void xten_coreShiftInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
+    static inline void xten_coreShiftInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode) // TODO test and figure out how to single out EXTUI instruction
     {
-        // core shift instructions are(issues in the ISA specifing right and left specific assumed them from the names)
-        // EXTUI     extract field specified by immediates from a register                               RRR
-        // performs unsigned bit field extraction from a 32 bit register value shifts the contents of address register at right by sa
-        // which is split stored in bits 16 11..8 of the instruction word. shift amount is then anded with a mask of maskimm least-significant
-        // 1 bits and result is written to ar. the number of mask bits can be values  1..16 stored in the op2 field as maskimm-1
-        // bits extracted are sa+op2..sa
-        // this operation is undefined for sa+op2 > 31
-        // mask = 0^21-op2||1^op2+1
-        // AR[r] = (0^32||AR[t]) 31+sa..sa and mask
-        //
-        // SRLI      shift right logical by immediate                                                    RRR
-        // shifts contents of at right inserting zeros on the left by a constant amound encoded in the instruction word in the range 0..15
-        // no SRLI for shifts >= 16. EXTUI replaces these shifts
-        // AR[r] = (0^32||AR[t])31+sa..sa
-        //
-        // SRAI      shift right logical by immediate                                                    RRR
-        // arithmetically shifts the contents of at right inserting the sign of at on the left by a constant amount encoded in the instruction word in range 0..31
-        // sa field is split with 3 bits 3..0 in bits 11..8 and bit for in bit 20 in the instruction word. sa being shift amount.
-        // AR[r] = ((AR[t]31)^32||AR[t]) 31+sa..sa
-        //
-        // SLLI      shift left logical by immediate
-        // shifts the contents of as left by constant amount in range 1..31 encoded in the instruction in sa shift amount
-        // sa is split with bits 3..0 in bits 7..4 of the instruction word and bit 4 in bit 20 of the instruction word
-        // sa encoded as 32-shift when the sa field is 0 the result of this instruction is undefined.
-        // asselmbler encodes this instruction as or when the sa is zero
-        // AR[r] = (AR[s]||0^32) 31+sa..sa
-        //
-        // SRC       shift right combined by SAR with two registers as input and one as output           RRR
-        // performs a right shift of the concatenation of as and at by SAR shift amount register least significant 32 bits
-        // of the shift result are written to address register ar. shifts with wider input than output are called funnel shift. SRC directly peforms right funnel shifts.
-        // left funnel shifts are done by swapping the high and low operands to SRC and setting SAR to 32 minus the shift amount. SSL and SSA8B instructions
-        // directly implement such SAR settings. SRC is undefined if SAR > 32.
-        // sa = SAR 5..0
-        // AR[r] = (AR[s]||AR[t]) 31+sa..sa
-        //
-        // SLL       shift left logical by SAR                                                           RRR
-        // shifts the contents of as left by the number of bit positions specified(as 32 minus number of bit positions) in the SAR
-        // writing the result to ar. loads SAR wqith 32-shift transforming SLL to be implemented in the SRC funnel shifter using the SLL data as the most
-        // significant 32 bits and zero as teh least significant 32 bits.
-        // undefined if SAR > 32.
-        // sa = SAR5..0
-        // AR[r] = (AR[s]||0^32)31+sa..sa
-        //
-        // SRL       shift right logical by SAR                                                          RRR
-        // shifts contents of at right inserting zeros on the left by the number of bits specified by the SAR and writes results to ar
-        // SSR or SSA8B are used to load SAE with the shift amount from an address register.
-        // undefined fi SAR > 32
-        // sa = SAR5..0
-        // AR[r] = (0^32||AR[t])31+sa..sa
-        //
-        // SRA       shift right logical by SAR                                                          RRR
-        // arighmetically shifts the contents of at right inserting the sign of at on the left by the number of positions specified by SAR
-        // and writes results to ar. typically SSR or SSA8B instructions are used to load SAR with the shift amount from an address reigister.
-        // result is undefined if SAR>32
-        // sa = SAR 5..0
-        // AR[r] = ((AR[t] 31)^32||AR[t]) 31+sa..sa
-        //
-        // SSL       set SAR from register for left shift                                                RRR
-        // sets the SAR for a left shift like SLL left shift amount is the 5 least significant bits of address register as.
-        // 32 minus this amount is written to SAR. using 32 minus the left shift amount causes a right funnel shift and swapped high and low
-        // input operands perform a left shift
-        // sa=AR[s]4..0
-        // SAR = 32 - (0||sa)
-        //
-        // SSR       set SAR from register for right shift                                               RRR
-        // sets the shift amount register for a right shift the least significant 5 bits of as are written to SAR
-        // the most significan tbit of SAR is cleared.
-        // sa = AR[s]4..0
-        // SAR = 0||sa
-        //
-        // SSAI      set SAR to immediate value                                                          RRR
-        // Sets the SAR to a constant the shift amount sa field is split with bits 3..0 in bits 11..8 of the instruction word
-        // and bit 4 in bit 4 of the instruction word. primarily useful to set the shift amount for SRC.
-        // SAR = 0||sa
-        //
-        // SSA8B     use low 2 bits of address register to prepare SAR for SRC assuming big endian       RRR (The B is for Big endian)
-        // sets SAR for a left shift by multiples of eight(like for big-endian byyte alignment) left shift amount is the two
-        // least significant bits of as multiplied by eight. 32 minus this amount is written to SAR. using 32 minus the left shift amount
-        // causes a funnel right shift and swapped high and low input operands to perform a left shift. SSA8B is similar to SSL, except the
-        // shift amount is multiplied by eight.
-        // typically used to set up SRC instruction to shift bytes may be used with big-endian byte ordering to extract 32-bit balue from a non-alligned byte
-        // address(should have no unaligned byte addresses in this core architecture)
-        // SAR = 32 - (0||AR[s]1..0||0^3)
-        //
-        // SSA8L     use low 2 bits of address register to prepare SAR for SRC assuming little endian    RRR (The L is for little endian not left)
-        // sets the SAR for a right shift by multiples of eight(for example little-endian byte alignment). right shift amount is
-        // the two least significant bits of as multiplied by eight and written to SAR. this is similar to SSR except the shift amount is multiplied by eight.
-        // typically used to set up for an SRC isstruction to shift bytes. may be used with little-endian byte ordering to extract unaligned 332-bit values from non
-        // aligned byte address(should not happen in this core architecture)
-        // SAR = 0||AR[s]1..0||0^3
-        //
+
+        uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
+        uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+        uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
+        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 0 : 20)) & 0x0F;
+        uint32_t op1 = (opcode >> (CPU->msbFirstOption ? 4 : 16)) & 0x0F;
+
+        if (op2 == 0x4)
+        {
+            switch (r)
+            {
+            case 0x0:
+                // SSR       set SAR from register for right shift                                               RRR
+                // sets the shift amount register for a right shift the least significant 5 bits of as are written to SAR
+                // the most significan tbit of SAR is cleared.
+                // sa = AR[s]4..0
+                // SAR = 0||sa
+                printf("\n\tThe instruction is SSR\n");
+                CPU->sar = 0;
+                CPU->sar = CPU->sar | (CPU->registerFile[CPU->windowOffset + s] & 0x1F);
+                break;
+            case 0x1:
+                // SSL       set SAR from register for left shift                                                RRR
+                // sets the SAR for a left shift like SLL left shift amount is the 5 least significant bits of address register as.
+                // 32 minus this amount is written to SAR. using 32 minus the left shift amount causes a right funnel shift and swapped high and low
+                // input operands perform a left shift
+                // sa=AR[s]4..0
+                // SAR = 32 - (0||sa)
+                printf("\n\tThe instruction is SSL\n");
+                CPU->sar = 0;
+                CPU->sar = CPU->sar | (32 - (CPU->registerFile[CPU->windowOffset + s] & 0x1F));
+                break;
+            case 0x2:
+                // SSA8L     use low 2 bits of address register to prepare SAR for SRC assuming little endian    RRR (The L is for little endian not left)
+                // sets the SAR for a right shift by multiples of eight(for example little-endian byte alignment). right shift amount is
+                // the two least significant bits of as multiplied by eight and written to SAR. this is similar to SSR except the shift amount is multiplied by eight.
+                // typically used to set up for an SRC isstruction to shift bytes. may be used with little-endian byte ordering to extract unaligned 332-bit values from non
+                // aligned byte address(should not happen in this core architecture)
+                // SAR = 0||AR[s]1..0||0^3
+                printf("\n\tThe instruction is SSA8L\n");
+                CPU->sar = (as & 0x3) << 3;
+                break;
+            case 0x3:
+                // SSA8B     use low 2 bits of address register to prepare SAR for SRC assuming big endian       RRR (The B is for Big endian)
+                // sets SAR for a left shift by multiples of eight(like for big-endian byyte alignment) left shift amount is the two
+                // least significant bits of as multiplied by eight. 32 minus this amount is written to SAR. using 32 minus the left shift amount
+                // causes a funnel right shift and swapped high and low input operands to perform a left shift. SSA8B is similar to SSL, except the
+                // shift amount is multiplied by eight.
+                // typically used to set up SRC instruction to shift bytes may be used with big-endian byte ordering to extract 32-bit balue from a non-alligned byte
+                // address(should have no unaligned byte addresses in this core architecture)
+                // SAR = 32 - (0||AR[s]1..0||0^3)
+                printf("\n\tThe instruction is SSA8B\n");
+                CPU->sar = 32 - ((as & 0x3) << 3);
+                break;
+            case 0x4:
+                // SRAI      shift right logical by immediate                                                    RRR
+                // arithmetically shifts the contents of at right inserting the sign of at on the left by a constant amount encoded in the instruction word in range 0..31
+                // sa field is split with 3 bits 3..0 in bits 11..8 and bit for in bit 20 in the instruction word. sa being shift amount.
+                // AR[r] = ((AR[t]31)^32||AR[t]) 31+sa..sa
+                printf("\n\tThe instruction is SRAI\n");
+                {
+                    int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                    uint32_t sa = (op2 % 2) << 4 | s;
+                    CPU->registerFile[CPU->windowOffset + r] = at >> sa;
+                }
+                break;
+            default:
+                if (op1 == 0x1)
+                {
+                    // SRLI      shift right logical by immediate                                                    RRR
+                    // shifts contents of at right inserting zeros on the left by a constant amound encoded in the instruction word in the range 0..15
+                    // no SRLI for shifts >= 16. EXTUI replaces these shifts
+                    // AR[r] = (0^32||AR[t])31+sa..sa
+                    printf("\n\tThe instruction is SRLI\n");
+                    {
+                        if (s >= 16)
+                        {
+                            // EXTUI     extract field specified by immediates from a register                               RRR
+                            // performs unsigned bit field extraction from a 32 bit register value shifts the contents of address register at right by sa
+                            // which is split stored in bits 16 11..8 of the instruction word. shift amount is then anded with a mask of maskimm least-significant
+                            // 1 bits and result is written to ar. the number of mask bits can be values  1..16 stored in the op2 field as maskimm-1
+                            // bits extracted are sa+op2..sa
+                            // this operation is undefined for sa+op2 > 31
+                            // mask = 0^21-op2||1^op2+1
+                            // AR[r] = (0^32||AR[t]) 31+sa..sa and mask
+                        }
+                        else
+                        {
+                            int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                            CPU->registerFile[CPU->windowOffset + r] = at >> s;
+                        }
+                    }
+                }
+                printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+                break;
+            }
+        }
+        else
+        {
+            switch (op2)
+            {
+            case 0x8:
+                // SRC       shift right combined by SAR with two registers as input and one as output           RRR
+                // performs a right shift of the concatenation of as and at by SAR shift amount register least significant 32 bits
+                // of the shift result are written to address register ar. shifts with wider input than output are called funnel shift. SRC directly peforms right funnel shifts.
+                // left funnel shifts are done by swapping the high and low operands to SRC and setting SAR to 32 minus the shift amount. SSL and SSA8B instructions
+                // directly implement such SAR settings. SRC is undefined if SAR > 32.
+                // sa = SAR 5..0
+                // AR[r] = (AR[s]||AR[t]) 31+sa..sa
+                printf("\n\tThe instruction is SRC\n");
+                {
+                    uint64_t concat = ((uint64_t)as << 32) | at;
+                    CPU->registerFile[CPU->windowOffset + r] = concat >> CPU->sar;
+                }
+                break;
+            case 0xA:
+                // SLL       shift left logical by SAR                                                           RRR
+                // shifts the contents of as left by the number of bit positions specified(as 32 minus number of bit positions) in the SAR
+                // writing the result to ar. loads SAR wqith 32-shift transforming SLL to be implemented in the SRC funnel shifter using the SLL data as the most
+                // significant 32 bits and zero as teh least significant 32 bits.
+                // undefined if SAR > 32.
+                // sa = SAR5..0
+                // AR[r] = (AR[s]||0^32)31+sa..sa
+                printf("\n\tThe instruction is SLL\n");
+                {
+                    CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + s] << (32 - CPU->sar);
+                }
+                break;
+            case 0x9:
+                // SRL       shift right logical by SAR                                                          RRR
+                // shifts contents of at right inserting zeros on the left by the number of bits specified by the SAR and writes results to ar
+                // SSR or SSA8B are used to load SAE with the shift amount from an address register.
+                // undefined fi SAR > 32
+                // sa = SAR5..0
+                // AR[r] = (0^32||AR[t])31+sa..sa
+                printf("\n\tThe instruction is SRL\n");
+                {
+                    CPU->registerFile[CPU->windowOffset + r] = CPU->registerFile[CPU->windowOffset + t] >> CPU->sar;
+                }
+                break;
+            case 0xB:
+                // SRA       shift right logical by SAR                                                          RRR
+                // arighmetically shifts the contents of at right inserting the sign of at on the left by the number of positions specified by SAR
+                // and writes results to ar. typically SSR or SSA8B instructions are used to load SAR with the shift amount from an address reigister.
+                // result is undefined if SAR>32
+                // sa = SAR 5..0
+                printf("\n\tThe instruction is SRA\n");
+                {
+                    int32_t at = (int32_t)CPU->registerFile[CPU->windowOffset + t];
+                    CPU->registerFile[CPU->windowOffset + r] = at >> CPU->sar;
+                }
+                break;
+            default:
+                if (((opcode >> 5) & 0x7) == 0x2) // TODO fix this instruction trouble figuring out the SA register
+                {
+                    // EXTUI     extract field specified by immediates from a register                               RRR
+                    // performs unsigned bit field extraction from a 32 bit register value shifts the contents of address register at right by sa
+                    // which is split stored in bits 16 11..8 of the instruction word. shift amount is then anded with a mask of maskimm least-significant
+                    // 1 bits and result is written to ar. the number of mask bits can be values  1..16 stored in the op2 field as maskimm-1
+                    // bits extracted are sa+op2..sa
+                    // this operation is undefined for sa+op2 > 31
+                    // mask = 0^21-op2||1^op2+1
+                    // AR[r] = (0^32||AR[t]) 31+sa..sa and mask
+                    printf("\n\tThe instruction is EXTUI\n");
+                    {
+                        uint32_t sa = (op2 % 2) << 4 | s;
+                    }
+                }
+                if (((opcode >> 1) & 0xF) == 0x9)
+                {
+                    // SSAI      set SAR to immediate value                                                          RRR
+                    // Sets the SAR to a constant the shift amount sa field is split with bits 3..0 in bits 11..8 of the instruction word
+                    // and bit 4 in bit 4 of the instruction word. primarily useful to set the shift amount for SRC.
+                    // SAR = 0||sa
+                    printf("\n\tThe instruction is SSAI\n");
+                }
+                else if (((opcode >> 1) & 0xF) == 0x8)
+                {
+                    // SLLI      shift left logical by immediate
+                    // shifts the contents of as left by constant amount in range 1..31 encoded in the instruction in sa shift amount
+                    // sa is split with bits 3..0 in bits 7..4 of the instruction word and bit 4 in bit 20 of the instruction word
+                    // sa encoded as 32-shift when the sa field is 0 the result of this instruction is undefined.
+                    // asselmbler encodes this instruction as or when the sa is zero
+                    // AR[r] = (AR[s]||0^32) 31+sa..sa
+                    printf("\n\tThe instruction is SLLI\n");
+                }
+                printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+                break;
+            }
+        }
     }
 
     static inline void xten_coreProcessorControlInstructions(Xtensa_lx_CPU *CPU, uint32_t opcode)
     {
-        // core processor control instructions are
-        // RSR       read a special register                                 RSR
-        // reads special register descibed in section 3.8.10 on page 45. contents of the special register designated by
-        // the 8-bit sr field of the instruction word are written to register at.
-        // WSR.* followed by an RSR.* should be separated with ESYNC to guarantee the value written is read back.
-        // on some implementations of the processor latency of RSR.* is greater than one cycle so it is advantagous to sechedule
-        // other instructions before instructions that use RSR.* results
-        // if RSR.* with special numbers >= 64 they are privileged RSR.* for unconfigured registers generally raise an illegal instruction exception
-        // sr = if msbFirst then s||r else r||s
-        // if sr >= 64 and CRING != 0 then exception (privilegedInstructionCause) if expetion option
-        // else tables in section 5.3 on page 208
-        //
-        // WSR       write a special register                                RSR
-        // writes the special registers that are described in section 3.8.10 on page 45 section 5.3 page 208
-        // has detailed info about this instruction for each register
-        // contents of at are written to special register designated by sr field of the instruction word.
-        // the point at which WSR to certain registers affects subsequent instructions is not always defined (SAR and ACC are exceptions)
-        // in these cases page 208 will clarify things. usually using one of the delay instructions to fix things.
-        // sr = if msbFirst then s||r else r||s
-        // if sr >= 64 and CRING != 0 then exception(privilegedInstructionCause)
-        // else see 208
-        //
-        // XSR       read and write a special register in an exchange        RRR
-        // These are starting to get complicated better to have all the information on them
-        /*XSR.* simultaneously reads and writes the special registers that are described in
-        Section 3.8.10 “Processor Control Instructions” on page 45. See Section 5.3 on
-        page 208 for more detailed information on the operation of this instruction for each
-        Special Register.
-        The contents of address register at and the Special Register designated by the immediate in the 8-bit sr field of the instruction word are both read. The read address register
-        value is then written to the Special Register, and the read Special Register value is written to at. The name of the Special Register is used in place of the ‘*’ in the assembler
-        syntax above and the translation is made to the 8-bit sr field by the assembler.
-        XSR is an assembler macro for XSR.*, which provides compatibility with the older versions of the instruction containing either the name or the number of the Special Register.
-        The point at which XSR.* to certain registers affects subsequent instructions is not always defined (SAR and ACC are exceptions). In these cases, the Special Register Tables
-        in Section 5.3 on page 208 explain how to ensure the effects are seen by a particular
-        point in the instruction stream (typically involving the use of one of the ISYNC, RSYNC,
-        ESYNC, or DSYNC instructions). An XSR.* followed by an RSR.* to the same register
-        should be separated with an ESYNC to guarantee the value written is read back. An
-        XSR.PS followed by RSIL also requires an ESYNC. In general, the restrictions on XSR.*
-        include the union of the restrictions of the corresponding RSR.* and WSR.*.
-        Xtensa Instruction Set Architecture (ISA) Reference Manual 567
-        XSR.* with Special Register numbers ≥ 64 is privileged. An XSR.* for an unconfigured
-        register generally will raise an illegal instruction exception.*/
-        // sr = msbFirst then s||r else r||s
-        // if sr >= 64 and CRING != 0 then exception(privilegedInstructionCause)
-        // else
-        //   t0 = AR[t]
-        //   t1 = see RSR frame of tables on 208
-        //
-        //  RUR       read user special register                              ?
-        //  reads TIE state that has been grouped into 32-bit quantities by the TIE user_register statement.
-        // register number placed in st field of encoded instruction contents of the TIE user_register designated by
-        // the 8 bit number 16*s+t are written to address register ar s and t correspond to respective fields of instruction word
-        // AR[r] = user_register[st]
-        //
-        //  WUR       write user special register                             ?
-        // writes TIE state that has been grouped into 32-bit quantities by the TIE user_register statement. register
-        // number placed in the st field of the encoded instruction. contents of at are written to the TIE user_register designated
-        // by the sr field of the instruction word.
-        // user_register[sr] = AR[t]
-        //
-        //  ISYNC     wait for instruction-Fetch-related changes to reslove   RRR
-        /*ISYNC waits for all previously fetched load, store, cache, TLB, WSR.*, and XSR.*
-        instructions that affect instruction fetch to be performed before fetching the next instruction. RSYNC, ESYNC, and DSYNC are performed as part of this instruction.
-        The proper sequence for writing instructions and then executing them is:
-         write instructions
-         use DHWB to force the data out of the data cache (this step may be skipped if writethrough, bypass, or no allocate stores were used)
-         use ISYNC to wait for the writes to be visible to instruction cache misses
-         use multiple IHI instructions to invalidate the instruction cache for any lines that
-        were modified (this step is not appropriate if the affected instructions are in InstRAM
-        or cannot be cached)
-         use ISYNC to ensure that fetch pipeline will see the new instructions
-        This instruction also waits for all previously executed WSR.* and XSR.* instructions that
-        affect instruction fetch or register access processor state, including:
-         WSR.LCOUNT, WSR.LBEG, WSR.LEND
-         WSR.IBREAKENABLE, WSR.IBREAKA[i]
-         WSR.CCOMPAREn
-        See the Special Register Tables in Section 5.3 on page 208 and Section 5.7 on
-        page 240, for a complete description of the ISYNC instruction’s uses.*/
-        // isync()
-        //
-        //  RSYNC     wait for dispatch related changes to resolve            RRR
-        // waits for all perviously fetched WSR instructions to be perfoemd before interpreting the register fields fo the next instruction
-        // this operation is also performed as part of ISYNC. ESYNC and DSYNC are peroformed as part of this instruction
-        // used after specific WSR calls before using resluts
-        // execution of this instruction is specific to the execution pipeline
-        //
-        //  ESYNC     wait for execution related changes to resolve           RRR
-        // waits for all perviously fetched WSR and XSR instructions to be performed before next instruction uses any register values
-        // performed as part of ISYNC and RSYNC. DSYNC is performedc as part of this instruction.
-        // used after WSR.EPC* instructions specfic to the pipeline.
-        //
-        //  DSYNC     wait for data memory related changes to resolve         RRR
-        // waits for all previously fetched WSR.*, XSR.*, WDTLB, and IDTLB instructions to be performed before interpreting the virtual address
-        // of next load or store instruction this is performed as part of ISYNC RSYNC and ESYNC
-        // used for WSR.DBREAKC* and WSR.DBREAKA* instructions
-        // pipeline specific
-        //
+        uint32_t s = (opcode >> (CPU->msbFirstOption ? 12 : 8)) & 0x0F;
+        uint32_t t = (opcode >> (CPU->msbFirstOption ? 16 : 4)) & 0x0F;
+        uint32_t r = (opcode >> (CPU->msbFirstOption ? 8 : 12)) & 0x0F;
+        uint32_t op2 = (opcode >> (CPU->msbFirstOption ? 0 : 20)) & 0x0F;
+
+        switch (op2)
+        {
+        case 0x0:
+            // RSR       read a special register                                 RSR
+            // reads special register descibed in section 3.8.10 on page 45. contents of the special register designated by
+            // the 8-bit sr field of the instruction word are written to register at.
+            // WSR.* followed by an RSR.* should be separated with ESYNC to guarantee the value written is read back.
+            // on some implementations of the processor latency of RSR.* is greater than one cycle so it is advantagous to sechedule
+            // other instructions before instructions that use RSR.* results
+            // if RSR.* with special numbers >= 64 they are privileged RSR.* for unconfigured registers generally raise an illegal instruction exception
+            // sr = if msbFirst then s||r else r||s
+            // if sr >= 64 and CRING != 0 then exception (privilegedInstructionCause) if expetion option
+            // else tables in section 5.3 on page 208
+            printf("\n\tThe instruction is RSR\n");
+            break;
+        case 0x1:
+            // WSR       write a special register                                RSR
+            // writes the special registers that are described in section 3.8.10 on page 45 section 5.3 page 208
+            // has detailed info about this instruction for each register
+            // contents of at are written to special register designated by sr field of the instruction word.
+            // the point at which WSR to certain registers affects subsequent instructions is not always defined (SAR and ACC are exceptions)
+            // in these cases page 208 will clarify things. usually using one of the delay instructions to fix things.
+            // sr = if msbFirst then s||r else r||s
+            // if sr >= 64 and CRING != 0 then exception(privilegedInstructionCause)
+            // else see 208
+            printf("\n\tThe instruction is WSR\n");
+            break;
+        case 0x6:
+            // XSR       read and write a special register in an exchange        RRR
+            // These are starting to get complicated better to have all the information on them
+            /*XSR.* simultaneously reads and writes the special registers that are described in
+            Section 3.8.10 “Processor Control Instructions” on page 45. See Section 5.3 on
+            page 208 for more detailed information on the operation of this instruction for each
+            Special Register.
+            The contents of address register at and the Special Register designated by the immediate in the 8-bit sr field of the instruction word are both read. The read address register
+            value is then written to the Special Register, and the read Special Register value is written to at. The name of the Special Register is used in place of the ‘*’ in the assembler
+            syntax above and the translation is made to the 8-bit sr field by the assembler.
+            XSR is an assembler macro for XSR.*, which provides compatibility with the older versions of the instruction containing either the name or the number of the Special Register.
+            The point at which XSR.* to certain registers affects subsequent instructions is not always defined (SAR and ACC are exceptions). In these cases, the Special Register Tables
+            in Section 5.3 on page 208 explain how to ensure the effects are seen by a particular
+            point in the instruction stream (typically involving the use of one of the ISYNC, RSYNC,
+            ESYNC, or DSYNC instructions). An XSR.* followed by an RSR.* to the same register
+            should be separated with an ESYNC to guarantee the value written is read back. An
+            XSR.PS followed by RSIL also requires an ESYNC. In general, the restrictions on XSR.*
+            include the union of the restrictions of the corresponding RSR.* and WSR.*.
+            Xtensa Instruction Set Architecture (ISA) Reference Manual 567
+            XSR.* with Special Register numbers ≥ 64 is privileged. An XSR.* for an unconfigured
+            register generally will raise an illegal instruction exception.*/
+            // sr = msbFirst then s||r else r||s
+            // if sr >= 64 and CRING != 0 then exception(privilegedInstructionCause)
+            // else
+            //   t0 = AR[t]
+            //   t1 = see RSR frame of tables on 208
+            printf("\n\tThe instruction is XSR\n");
+            break;
+        case 0xE:
+            //  RUR       read user special register                              ?
+            //  reads TIE state that has been grouped into 32-bit quantities by the TIE user_register statement.
+            // register number placed in st field of encoded instruction contents of the TIE user_register designated by
+            // the 8 bit number 16*s+t are written to address register ar s and t correspond to respective fields of instruction word
+            // AR[r] = user_register[st]
+            printf("\n\tThe instruction is RUR\n");
+            break;
+        case 0x3:
+            //  WUR       write user special register                             ?
+            // writes TIE state that has been grouped into 32-bit quantities by the TIE user_register statement. register
+            // number placed in the st field of the encoded instruction. contents of at are written to the TIE user_register designated
+            // by the sr field of the instruction word.
+            // user_register[sr] = AR[t]
+            printf("\n\tThe instruction is WUR\n");
+            break;
+        default:
+            switch (opcode)
+            {
+            case 0x000200:
+                //  ISYNC     wait for instruction-Fetch-related changes to reslove   RRR
+                /*ISYNC waits for all previously fetched load, store, cache, TLB, WSR.*, and XSR.*
+                instructions that affect instruction fetch to be performed before fetching the next instruction. RSYNC, ESYNC, and DSYNC are performed as part of this instruction.
+                The proper sequence for writing instructions and then executing them is:
+                 write instructions
+                 use DHWB to force the data out of the data cache (this step may be skipped if writethrough, bypass, or no allocate stores were used)
+                 use ISYNC to wait for the writes to be visible to instruction cache misses
+                 use multiple IHI instructions to invalidate the instruction cache for any lines that
+                were modified (this step is not appropriate if the affected instructions are in InstRAM
+                or cannot be cached)
+                 use ISYNC to ensure that fetch pipeline will see the new instructions
+                This instruction also waits for all previously executed WSR.* and XSR.* instructions that
+                affect instruction fetch or register access processor state, including:
+                 WSR.LCOUNT, WSR.LBEG, WSR.LEND
+                 WSR.IBREAKENABLE, WSR.IBREAKA[i]
+                 WSR.CCOMPAREn
+                See the Special Register Tables in Section 5.3 on page 208 and Section 5.7 on
+                page 240, for a complete description of the ISYNC instruction’s uses.*/
+                // isync()
+                printf("\n\tThe instruction is ISYNC\n");
+                break;
+            case 0x010200:
+                //  RSYNC     wait for dispatch related changes to resolve            RRR
+                // waits for all perviously fetched WSR instructions to be perfoemd before interpreting the register fields fo the next instruction
+                // this operation is also performed as part of ISYNC. ESYNC and DSYNC are peroformed as part of this instruction
+                // used after specific WSR calls before using resluts
+                // execution of this instruction is specific to the execution pipeline
+                printf("\n\tThe instruction is RSYNC\n");
+                break;
+            case 0x020200:
+                //  ESYNC     wait for execution related changes to resolve           RRR
+                // waits for all perviously fetched WSR and XSR instructions to be performed before next instruction uses any register values
+                // performed as part of ISYNC and RSYNC. DSYNC is performedc as part of this instruction.
+                // used after WSR.EPC* instructions specfic to the pipeline.
+                printf("\n\tThe instruction is ESYNC\n");
+                break;
+            case 0x030200:
+                //  DSYNC     wait for data memory related changes to resolve         RRR
+                // waits for all previously fetched WSR.*, XSR.*, WDTLB, and IDTLB instructions to be performed before interpreting the virtual address
+                // of next load or store instruction this is performed as part of ISYNC RSYNC and ESYNC
+                // used for WSR.DBREAKC* and WSR.DBREAKA* instructions
+                // pipeline specific
+                printf("\n\tThe instruction is DSYNC\n");
+                break;
+            default:
+                printf("\nSomething went wrong proceeded to xten_coreMemoryOrderingInstructions without a valid opcode this error could have come from the code being run\n");
+                break;
+            }
+        }
     }
 
     /**
